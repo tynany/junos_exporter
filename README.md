@@ -2,7 +2,7 @@
 A Prometheus exporter that collects metrics from Junos devices using SSH NETCONF sessions and exposes them via HTTP, ready for collection by Prometheus.
 
 ## Getting Started
-Start junos_exporter with a valid configuration file using the --config.path flag. To then collect the metrics of a device, pass the 'config' and target 'parameter' to the exporter's web interface. For example, http://exporter:9347/metrics?config=default&target=192.168.1.1.
+Start junos_exporter with a valid configuration file using the --config.path flag. To then collect the metrics of a device, pass the 'config' and 'target' parameter to the exporter's web interface. For example, http://exporter:9347/metrics?config=default&target=192.168.1.1.
 
 Promethues configuraiton:
 ```
@@ -72,12 +72,12 @@ Each configuration is called by passing the 'config' parameter to the exporter's
 If allowed_targets is specified, only those targets may be collected. This is a form of security that stops a malicious user trying to collect details, such as the username and password, by specifying a target they control.
 
 ### global
-Global configuration applies to all configs, where that configuration item has not already been set.
+Global applies to all configs, where that configuration item has not already been set under a specific config.
 
 ## Metrics
 The below metrics are currently implemented.
-- Interface Statistics
-- BGP
+- Interface Statistics, from `show interface extensive`.
+- BGP, from `show bgp summary`.
 
 ## Development
 ### Building
