@@ -22,6 +22,11 @@ scrape_configs:
         replacement: junos_exporter:9347  # Junos exporter's address and port.
 ```
 
+Docker:
+```
+docker run --restart unless-stopped -d -p 9347:9347 -v /home/user/.ssh/ssh_key:/ssh_key  -v /home/user/config.yaml:/config.yaml junos_exporter
+```
+The above Docker commands assumes a configuration file that specifies the SSK key as /ssh_key is located locally in /home/user/config.yaml.
 ## Configuration file
 Junos exporter requires a configuration file in the below format:
 ```
@@ -86,3 +91,9 @@ go get github.com/tynany/junos_exporter
 cd ${GOPATH}/src/github.com/tynany/junos_exporter
 go build
 ```
+
+### NETCONF Output
+XML was chosen as the output format of NETCONF commands for the below reasons:
+
+ - Junos devices return XML faster than any other format, more than half the time it takes fora JSON response. Presumedly this is because XML is the native configuration format of Junos.
+ - It is only possible to use NETCONF filter tags when the output is XML.
