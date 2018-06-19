@@ -24,7 +24,7 @@ scrape_configs:
 
 Docker:
 ```
-docker run --restart unless-stopped -d -p 9347:9347 -v /home/user/.ssh/ssh_key:/ssh_key  -v /home/user/config.yaml:/config.yaml junos_exporter
+docker run --restart unless-stopped -d -p 9347:9347 -v /home/user/.ssh/ssh_key:/ssh_key  -v /home/user/config.yaml:/config.yaml tynany/junos_exporter
 ```
 The above Docker commands assumes a configuration file that specifies the SSK key as /ssh_key is located locally in /home/user/config.yaml.
 
