@@ -136,20 +136,20 @@ func colPromDesc(subsystem string, metricName string, metricDescription string, 
 
 func newGauge(ch chan<- prometheus.Metric, descName *prometheus.Desc, metric string, labels ...string) {
 	if metric != "" {
-		i, err := strconv.Atoi(strings.TrimSpace(metric))
+		i, err := strconv.ParseFloat(strings.TrimSpace(metric), 64)
 		if err != nil {
-			log.Errorf("could not convert metric to string: %s", err)
+			log.Errorf("could not convert metric to float64: %s", err)
 		}
-		ch <- prometheus.MustNewConstMetric(descName, prometheus.GaugeValue, float64(i), labels...)
+		ch <- prometheus.MustNewConstMetric(descName, prometheus.GaugeValue, i, labels...)
 	}
 }
 
 func newCounter(ch chan<- prometheus.Metric, descName *prometheus.Desc, metric string, labels ...string) {
 	if metric != "" {
-		i, err := strconv.Atoi(strings.TrimSpace(metric))
+		i, err := strconv.ParseFloat(strings.TrimSpace(metric), 64)
 		if err != nil {
-			log.Errorf("could not convert metric to string: %s", err)
+			log.Errorf("could not convert metric to float64: %s", err)
 		}
-		ch <- prometheus.MustNewConstMetric(descName, prometheus.CounterValue, float64(i), labels...)
+		ch <- prometheus.MustNewConstMetric(descName, prometheus.CounterValue, i, labels...)
 	}
 }

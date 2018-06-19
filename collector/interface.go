@@ -3,6 +3,7 @@ package collector
 import (
 	"encoding/xml"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/Juniper/go-netconf/netconf"
@@ -145,6 +146,7 @@ var (
 		"FlowInputMulticastPackets":                colPromDesc(ifaceSubsystem, "flow_input_multicast_packets", "Flow Input Multicast Packets.", ifacePhysicalLabels),
 		"FlowInputPolicyBytes":                     colPromDesc(ifaceSubsystem, "flow_input_policy_bytes", "Flow Input Policy Bytes.", ifacePhysicalLabels),
 		"FlowInputConnections":                     colPromDesc(ifaceSubsystem, "flow_input_connections", "Flow Input Connections.", ifacePhysicalLabels),
+		"SpeedBytes":                               colPromDesc(ifaceSubsystem, "speed_bytes", "Speed of the Interface in Bytes per Second", ifacePhysicalLabels),
 	}
 
 	ifaceErrors      = []error{}
@@ -211,49 +213,64 @@ func processIfaceNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metr
 	if err := xml.Unmarshal([]byte(reply.RawReply), &netconfReply); err != nil {
 		return fmt.Errorf("could not unmarshal netconf reply xml: %s", err)
 	}
-	for _, ifaceText := range netconfReply.InterfaceInformation.PhysicalInterface {
-		ifaceLabels := []string{strings.TrimSpace(ifaceText.Name.Text)}
-		if strings.TrimSpace(ifaceText.AdminStatus.Text) == "up" {
-			if strings.TrimSpace(ifaceText.OperStatus.Text) == "up" {
+	for _, ifaceData := range netconfReply.InterfaceInformation.PhysicalInterface {
+		ifaceLabels := []string{strings.TrimSpace(ifaceData.Name.Text)}
+		if strings.TrimSpace(ifaceData.AdminStatus.Text) == "up" {
+			if strings.TrimSpace(ifaceData.OperStatus.Text) == "up" {
 				ch <- prometheus.MustNewConstMetric(ifaceDesc["Up"], prometheus.GaugeValue, 1.0, ifaceLabels...)
 			} else {
 				ch <- prometheus.MustNewConstMetric(ifaceDesc["Up"], prometheus.GaugeValue, 0.0, ifaceLabels...)
 			}
 		}
-		newCounter(ch, ifaceDesc["InterfaceFlapped"], ifaceText.InterfaceFlapped.Seconds, ifaceLabels...)
-		newCounter(ch, ifaceDesc["InputBytes"], ifaceText.TrafficStatistics.InputBytes.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["OutputBytes"], ifaceText.TrafficStatistics.OutputBytes.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["InputPackets"], ifaceText.TrafficStatistics.InputPackets.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["OutputPackets"], ifaceText.TrafficStatistics.OutputPackets.Text, ifaceLabels...)
-		newGauge(ch, ifaceDesc["InputBps"], ifaceText.TrafficStatistics.InputBps.Text, ifaceLabels...)
-		newGauge(ch, ifaceDesc["OutputBps"], ifaceText.TrafficStatistics.OutputBps.Text, ifaceLabels...)
-		newGauge(ch, ifaceDesc["InputPps"], ifaceText.TrafficStatistics.InputPps.Text, ifaceLabels...)
-		newGauge(ch, ifaceDesc["OutputPps"], ifaceText.TrafficStatistics.OutputPps.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["V6InputBytes"], ifaceText.TrafficStatistics.Ipv6TransitStatistics.InputBytes.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["V6OutputBytes"], ifaceText.TrafficStatistics.Ipv6TransitStatistics.OutputBytes.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["V6InputPackets"], ifaceText.TrafficStatistics.Ipv6TransitStatistics.InputPackets.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["V6OutputPackets"], ifaceText.TrafficStatistics.Ipv6TransitStatistics.OutputPackets.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["InputErrors"], ifaceText.InputErrorList.InputErrors.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["InputDrops"], ifaceText.InputErrorList.InputDrops.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["FramingErrors"], ifaceText.InputErrorList.FramingErrors.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["InputRunts"], ifaceText.InputErrorList.InputRunts.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["InputGiants"], ifaceText.InputErrorList.InputGiants.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["InputDiscards"], ifaceText.InputErrorList.InputDiscards.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["InputResourceErrors"], ifaceText.InputErrorList.InputResourceErrors.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["InputL3Incompletes"], ifaceText.InputErrorList.InputL3Incompletes.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["InputL2ChannelErrors"], ifaceText.InputErrorList.InputL2ChannelErrors.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["InputL2MismatchTimeouts"], ifaceText.InputErrorList.InputL2MismatchTimeouts.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["InputFifoErrors"], ifaceText.InputErrorList.InputFifoErrors.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["CarrierTransitions"], ifaceText.OutputErrorList.CarrierTransitions.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["OutputErrors"], ifaceText.OutputErrorList.OutputErrors.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["OutputDrops"], ifaceText.OutputErrorList.OutputDrops.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["MtuErrors"], ifaceText.OutputErrorList.MtuErrors.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["OutputResourceErrors"], ifaceText.OutputErrorList.OutputResourceErrors.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["OutputCollisions"], ifaceText.OutputErrorList.OutputCollisions.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["AgedPackets"], ifaceText.OutputErrorList.AgedPackets.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["HsLinkCrcErrors"], ifaceText.OutputErrorList.HsLinkCrcErrors.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["OutputFifoErrors"], ifaceText.OutputErrorList.OutputFifoErrors.Text, ifaceLabels...)
-		for _, logIface := range ifaceText.LogicalInterfaces {
+		if len(ifaceData.Speed.Text) > 0 {
+			if strings.Contains(strings.TrimSpace(ifaceData.Speed.Text), "Gbps") {
+				i, err := strconv.Atoi(strings.TrimRight(strings.TrimSpace(ifaceData.Speed.Text), "Gbps"))
+				if err != nil {
+					return err
+				}
+				ch <- prometheus.MustNewConstMetric(ifaceDesc["SpeedBytes"], prometheus.GaugeValue, float64(i*125000000), ifaceLabels...)
+			} else if strings.Contains(strings.TrimSpace(ifaceData.Speed.Text), "mbps") {
+				i, err := strconv.Atoi(strings.TrimRight(strings.TrimSpace(ifaceData.Speed.Text), "mbps"))
+				if err != nil {
+					return err
+				}
+				ch <- prometheus.MustNewConstMetric(ifaceDesc["SpeedBytes"], prometheus.GaugeValue, float64(i*125000), ifaceLabels...)
+			}
+		}
+		newCounter(ch, ifaceDesc["InterfaceFlapped"], ifaceData.InterfaceFlapped.Seconds, ifaceLabels...)
+		newCounter(ch, ifaceDesc["InputBytes"], ifaceData.TrafficStatistics.InputBytes.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["OutputBytes"], ifaceData.TrafficStatistics.OutputBytes.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["InputPackets"], ifaceData.TrafficStatistics.InputPackets.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["OutputPackets"], ifaceData.TrafficStatistics.OutputPackets.Text, ifaceLabels...)
+		newGauge(ch, ifaceDesc["InputBps"], ifaceData.TrafficStatistics.InputBps.Text, ifaceLabels...)
+		newGauge(ch, ifaceDesc["OutputBps"], ifaceData.TrafficStatistics.OutputBps.Text, ifaceLabels...)
+		newGauge(ch, ifaceDesc["InputPps"], ifaceData.TrafficStatistics.InputPps.Text, ifaceLabels...)
+		newGauge(ch, ifaceDesc["OutputPps"], ifaceData.TrafficStatistics.OutputPps.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["V6InputBytes"], ifaceData.TrafficStatistics.Ipv6TransitStatistics.InputBytes.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["V6OutputBytes"], ifaceData.TrafficStatistics.Ipv6TransitStatistics.OutputBytes.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["V6InputPackets"], ifaceData.TrafficStatistics.Ipv6TransitStatistics.InputPackets.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["V6OutputPackets"], ifaceData.TrafficStatistics.Ipv6TransitStatistics.OutputPackets.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["InputErrors"], ifaceData.InputErrorList.InputErrors.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["InputDrops"], ifaceData.InputErrorList.InputDrops.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["FramingErrors"], ifaceData.InputErrorList.FramingErrors.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["InputRunts"], ifaceData.InputErrorList.InputRunts.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["InputGiants"], ifaceData.InputErrorList.InputGiants.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["InputDiscards"], ifaceData.InputErrorList.InputDiscards.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["InputResourceErrors"], ifaceData.InputErrorList.InputResourceErrors.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["InputL3Incompletes"], ifaceData.InputErrorList.InputL3Incompletes.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["InputL2ChannelErrors"], ifaceData.InputErrorList.InputL2ChannelErrors.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["InputL2MismatchTimeouts"], ifaceData.InputErrorList.InputL2MismatchTimeouts.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["InputFifoErrors"], ifaceData.InputErrorList.InputFifoErrors.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["CarrierTransitions"], ifaceData.OutputErrorList.CarrierTransitions.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["OutputErrors"], ifaceData.OutputErrorList.OutputErrors.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["OutputDrops"], ifaceData.OutputErrorList.OutputDrops.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["MtuErrors"], ifaceData.OutputErrorList.MtuErrors.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["OutputResourceErrors"], ifaceData.OutputErrorList.OutputResourceErrors.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["OutputCollisions"], ifaceData.OutputErrorList.OutputCollisions.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["AgedPackets"], ifaceData.OutputErrorList.AgedPackets.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["HsLinkCrcErrors"], ifaceData.OutputErrorList.HsLinkCrcErrors.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["OutputFifoErrors"], ifaceData.OutputErrorList.OutputFifoErrors.Text, ifaceLabels...)
+		for _, logIface := range ifaceData.LogicalInterfaces {
 			logIfaceLabels := []string{strings.TrimSpace(logIface.Name.Text)}
 			newCounter(ch, ifaceDesc["InputBytes"], logIface.TrafficStatistics.InputBytes.Text, logIfaceLabels...)
 			newCounter(ch, ifaceDesc["OutputBytes"], logIface.TrafficStatistics.OutputBytes.Text, logIfaceLabels...)
@@ -293,76 +310,85 @@ func processIfaceNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metr
 			newCounter(ch, ifaceDesc["FlowOutputMulticastPackets"], logIface.SecurityOutputFlowStatistics.FlowOutputMulticastPackets.Text, logIfaceLabels...)
 			newCounter(ch, ifaceDesc["FlowOutputPolicyBytes"], logIface.SecurityOutputFlowStatistics.FlowOutputPolicyBytes.Text, logIfaceLabels...)
 		}
-		newCounter(ch, ifaceDesc["StpInputBytesDropped"], ifaceText.StpTrafficStatistics.StpInputBytesDropped.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["StpOutputBytesDropped"], ifaceText.StpTrafficStatistics.StpOutputBytesDropped.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["StpInputPacketsDropped"], ifaceText.StpTrafficStatistics.StpInputPacketsDropped.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["StpOutputPacketsDropped"], ifaceText.StpTrafficStatistics.StpOutputPacketsDropped.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["BitErrorSeconds"], ifaceText.EthernetPcsStatistics.BitErrorSeconds.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["ErroredBlocksSeconds"], ifaceText.EthernetPcsStatistics.ErroredBlocksSeconds.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["MACInputBytes"], ifaceText.EthernetMacStatistics.InputBytes.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["MACOutputBytes"], ifaceText.EthernetMacStatistics.OutputBytes.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["MACInputPackets"], ifaceText.EthernetMacStatistics.InputPackets.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["MACOutputPackets"], ifaceText.EthernetMacStatistics.OutputPackets.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["MACInputUnicasts"], ifaceText.EthernetMacStatistics.InputUnicasts.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["MACOutputUnicasts"], ifaceText.EthernetMacStatistics.OutputUnicasts.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["MACInputBroadcasts"], ifaceText.EthernetMacStatistics.InputBroadcasts.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["MACOutputBroadcasts"], ifaceText.EthernetMacStatistics.OutputBroadcasts.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["MACInputMulticasts"], ifaceText.EthernetMacStatistics.InputMulticasts.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["MACOutputMulticasts"], ifaceText.EthernetMacStatistics.OutputMulticasts.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["MACInputCrcErrors"], ifaceText.EthernetMacStatistics.InputCrcErrors.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["MACOutputCrcErrors"], ifaceText.EthernetMacStatistics.OutputCrcErrors.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["MACInputFifoErrors"], ifaceText.EthernetMacStatistics.InputFifoErrors.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["MACOutputFifoErrors"], ifaceText.EthernetMacStatistics.OutputFifoErrors.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["MACInputMacControlFrames"], ifaceText.EthernetMacStatistics.InputMacControlFrames.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["MACOutputMacControlFrames"], ifaceText.EthernetMacStatistics.OutputMacControlFrames.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["MACInputMacPauseFrames"], ifaceText.EthernetMacStatistics.InputMacPauseFrames.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["MACOutputMacPauseFrames"], ifaceText.EthernetMacStatistics.OutputMacPauseFrames.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["MACInputOversizedFrames"], ifaceText.EthernetMacStatistics.InputOversizedFrames.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["MACInputJabberFrames"], ifaceText.EthernetMacStatistics.InputJabberFrames.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["MACInputFragmentFrames"], ifaceText.EthernetMacStatistics.InputFragmentFrames.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["MACInputVlanTaggedFrames"], ifaceText.EthernetMacStatistics.InputVlanTaggedFrames.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["MACInputCodeViolations"], ifaceText.EthernetMacStatistics.InputCodeViolations.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["MACInputTotalErrors"], ifaceText.EthernetMacStatistics.InputTotalErrors.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["MACOutputTotalErrors"], ifaceText.EthernetMacStatistics.OutputTotalErrors.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["FilterInputPackets"], ifaceText.EthernetFilterStatistics.InputPackets.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["FilterInputRejectCount"], ifaceText.EthernetFilterStatistics.InputRejectCount.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["FilterInputRejectDestinationAddressCount"], ifaceText.EthernetFilterStatistics.InputRejectDestinationAddressCount.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["FilterInputRejectSourceAddressCount"], ifaceText.EthernetFilterStatistics.InputRejectSourceAddressCount.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["FilterOutputPackets"], ifaceText.EthernetFilterStatistics.OutputPackets.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["FilterOutputPacketPadCount"], ifaceText.EthernetFilterStatistics.OutputPacketPadCount.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["FilterOutputPacketErrorCount"], ifaceText.EthernetFilterStatistics.OutputPacketErrorCount.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["FilterCamDestinationFilterCount"], ifaceText.EthernetFilterStatistics.CamDestinationFilterCount.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["FilterCamSourceFilterCount"], ifaceText.EthernetFilterStatistics.CamSourceFilterCount.Text, ifaceLabels...)
-		for _, preclStats := range ifaceText.PreclStatistics.PreclInformation.PreclPerClassStatistics {
-			preclLabels := append(ifaceLabels, strings.TrimSpace(preclStats.PreclTrafficClass.Text))
+		newCounter(ch, ifaceDesc["StpInputBytesDropped"], ifaceData.StpTrafficStatistics.StpInputBytesDropped.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["StpOutputBytesDropped"], ifaceData.StpTrafficStatistics.StpOutputBytesDropped.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["StpInputPacketsDropped"], ifaceData.StpTrafficStatistics.StpInputPacketsDropped.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["StpOutputPacketsDropped"], ifaceData.StpTrafficStatistics.StpOutputPacketsDropped.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["BitErrorSeconds"], ifaceData.EthernetPcsStatistics.BitErrorSeconds.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["ErroredBlocksSeconds"], ifaceData.EthernetPcsStatistics.ErroredBlocksSeconds.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["MACInputBytes"], ifaceData.EthernetMacStatistics.InputBytes.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["MACOutputBytes"], ifaceData.EthernetMacStatistics.OutputBytes.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["MACInputPackets"], ifaceData.EthernetMacStatistics.InputPackets.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["MACOutputPackets"], ifaceData.EthernetMacStatistics.OutputPackets.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["MACInputUnicasts"], ifaceData.EthernetMacStatistics.InputUnicasts.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["MACOutputUnicasts"], ifaceData.EthernetMacStatistics.OutputUnicasts.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["MACInputBroadcasts"], ifaceData.EthernetMacStatistics.InputBroadcasts.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["MACOutputBroadcasts"], ifaceData.EthernetMacStatistics.OutputBroadcasts.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["MACInputMulticasts"], ifaceData.EthernetMacStatistics.InputMulticasts.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["MACOutputMulticasts"], ifaceData.EthernetMacStatistics.OutputMulticasts.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["MACInputCrcErrors"], ifaceData.EthernetMacStatistics.InputCrcErrors.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["MACOutputCrcErrors"], ifaceData.EthernetMacStatistics.OutputCrcErrors.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["MACInputFifoErrors"], ifaceData.EthernetMacStatistics.InputFifoErrors.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["MACOutputFifoErrors"], ifaceData.EthernetMacStatistics.OutputFifoErrors.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["MACInputMacControlFrames"], ifaceData.EthernetMacStatistics.InputMacControlFrames.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["MACOutputMacControlFrames"], ifaceData.EthernetMacStatistics.OutputMacControlFrames.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["MACInputMacPauseFrames"], ifaceData.EthernetMacStatistics.InputMacPauseFrames.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["MACOutputMacPauseFrames"], ifaceData.EthernetMacStatistics.OutputMacPauseFrames.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["MACInputOversizedFrames"], ifaceData.EthernetMacStatistics.InputOversizedFrames.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["MACInputJabberFrames"], ifaceData.EthernetMacStatistics.InputJabberFrames.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["MACInputFragmentFrames"], ifaceData.EthernetMacStatistics.InputFragmentFrames.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["MACInputVlanTaggedFrames"], ifaceData.EthernetMacStatistics.InputVlanTaggedFrames.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["MACInputCodeViolations"], ifaceData.EthernetMacStatistics.InputCodeViolations.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["MACInputTotalErrors"], ifaceData.EthernetMacStatistics.InputTotalErrors.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["MACOutputTotalErrors"], ifaceData.EthernetMacStatistics.OutputTotalErrors.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["FilterInputPackets"], ifaceData.EthernetFilterStatistics.InputPackets.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["FilterInputRejectCount"], ifaceData.EthernetFilterStatistics.InputRejectCount.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["FilterInputRejectDestinationAddressCount"], ifaceData.EthernetFilterStatistics.InputRejectDestinationAddressCount.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["FilterInputRejectSourceAddressCount"], ifaceData.EthernetFilterStatistics.InputRejectSourceAddressCount.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["FilterOutputPackets"], ifaceData.EthernetFilterStatistics.OutputPackets.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["FilterOutputPacketPadCount"], ifaceData.EthernetFilterStatistics.OutputPacketPadCount.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["FilterOutputPacketErrorCount"], ifaceData.EthernetFilterStatistics.OutputPacketErrorCount.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["FilterCamDestinationFilterCount"], ifaceData.EthernetFilterStatistics.CamDestinationFilterCount.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["FilterCamSourceFilterCount"], ifaceData.EthernetFilterStatistics.CamSourceFilterCount.Text, ifaceLabels...)
+		// Some devices can have duplicate traffic class names.
+		existingTrafficClasses := make(map[string]int)
+		for _, preclStats := range ifaceData.PreclStatistics.PreclInformation.PreclPerClassStatistics {
+			trafficClass := strings.TrimSpace(preclStats.PreclTrafficClass.Text)
+			if _, exists := existingTrafficClasses[trafficClass]; exists {
+				existingTrafficClasses[trafficClass]++
+				trafficClass = fmt.Sprintf("%s_%d", trafficClass, existingTrafficClasses[trafficClass])
+			} else {
+				existingTrafficClasses[trafficClass] = 0
+			}
+			preclLabels := append(ifaceLabels, trafficClass)
 			newCounter(ch, ifaceDesc["PreclRxPackets"], preclStats.PreclRxPackets.Text, preclLabels...)
 			newCounter(ch, ifaceDesc["PreclTxPackets"], preclStats.PreclTxPackets.Text, preclLabels...)
 			newCounter(ch, ifaceDesc["PreclDroppedPackets"], preclStats.PreclDroppedPackets.Text, preclLabels...)
 		}
-		newCounter(ch, ifaceDesc["FecCcwCount"], ifaceText.EthernetFecStatistics.FecCcwCount.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["FecNccwCount"], ifaceText.EthernetFecStatistics.FecNccwCount.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["FecCcwErrorRate"], ifaceText.EthernetFecStatistics.FecCcwErrorRate.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["FecNccwErrorRate"], ifaceText.EthernetFecStatistics.FecNccwErrorRate.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["MacsecTxScProtected"], ifaceText.MacsecStatistics.MacsecTxScProtected.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["MacsecTxScEncrypted"], ifaceText.MacsecStatistics.MacsecTxScEncrypted.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["MacsecTxScProtectedbytes"], ifaceText.MacsecStatistics.MacsecTxScProtectedbytes.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["MacsecTxScEncryptedbytes"], ifaceText.MacsecStatistics.MacsecTxScEncryptedbytes.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["MacsecRxScOk"], ifaceText.MacsecStatistics.MacsecRxScOk.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["MacsecRxScValidatedbytes"], ifaceText.MacsecStatistics.MacsecRxScValidatedbytes.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["MacsecRxScDecryptedbytes"], ifaceText.MacsecStatistics.MacsecRxScDecryptedbytes.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["OversizedFrames"], ifaceText.MultilinkInterfaceErrors.OversizedFrames.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["InputErrorFrames"], ifaceText.MultilinkInterfaceErrors.InputErrorFrames.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["InputDisabledBundle"], ifaceText.MultilinkInterfaceErrors.InputDisabledBundle.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["OutputDisabledBundle"], ifaceText.MultilinkInterfaceErrors.OutputDisabledBundle.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["QueuingDrops"], ifaceText.MultilinkInterfaceErrors.QueuingDrops.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["PacketBufferOverflow"], ifaceText.MultilinkInterfaceErrors.PacketBufferOverflow.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["FragmentBufferOverflow"], ifaceText.MultilinkInterfaceErrors.FragmentBufferOverflow.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["FragmentTimeout"], ifaceText.MultilinkInterfaceErrors.FragmentTimeout.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["SequenceNumberMissing"], ifaceText.MultilinkInterfaceErrors.SequenceNumberMissing.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["OutOfOrderSequenceNumber"], ifaceText.MultilinkInterfaceErrors.OutOfOrderSequenceNumber.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["OutOfRangeSequenceNumber"], ifaceText.MultilinkInterfaceErrors.OutOfRangeSequenceNumber.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["DataMemoryError"], ifaceText.MultilinkInterfaceErrors.DataMemoryError.Text, ifaceLabels...)
-		newCounter(ch, ifaceDesc["ControlMemoryError"], ifaceText.MultilinkInterfaceErrors.ControlMemoryError.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["FecCcwCount"], ifaceData.EthernetFecStatistics.FecCcwCount.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["FecNccwCount"], ifaceData.EthernetFecStatistics.FecNccwCount.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["FecCcwErrorRate"], ifaceData.EthernetFecStatistics.FecCcwErrorRate.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["FecNccwErrorRate"], ifaceData.EthernetFecStatistics.FecNccwErrorRate.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["MacsecTxScProtected"], ifaceData.MacsecStatistics.MacsecTxScProtected.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["MacsecTxScEncrypted"], ifaceData.MacsecStatistics.MacsecTxScEncrypted.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["MacsecTxScProtectedbytes"], ifaceData.MacsecStatistics.MacsecTxScProtectedbytes.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["MacsecTxScEncryptedbytes"], ifaceData.MacsecStatistics.MacsecTxScEncryptedbytes.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["MacsecRxScOk"], ifaceData.MacsecStatistics.MacsecRxScOk.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["MacsecRxScValidatedbytes"], ifaceData.MacsecStatistics.MacsecRxScValidatedbytes.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["MacsecRxScDecryptedbytes"], ifaceData.MacsecStatistics.MacsecRxScDecryptedbytes.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["OversizedFrames"], ifaceData.MultilinkInterfaceErrors.OversizedFrames.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["InputErrorFrames"], ifaceData.MultilinkInterfaceErrors.InputErrorFrames.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["InputDisabledBundle"], ifaceData.MultilinkInterfaceErrors.InputDisabledBundle.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["OutputDisabledBundle"], ifaceData.MultilinkInterfaceErrors.OutputDisabledBundle.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["QueuingDrops"], ifaceData.MultilinkInterfaceErrors.QueuingDrops.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["PacketBufferOverflow"], ifaceData.MultilinkInterfaceErrors.PacketBufferOverflow.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["FragmentBufferOverflow"], ifaceData.MultilinkInterfaceErrors.FragmentBufferOverflow.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["FragmentTimeout"], ifaceData.MultilinkInterfaceErrors.FragmentTimeout.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["SequenceNumberMissing"], ifaceData.MultilinkInterfaceErrors.SequenceNumberMissing.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["OutOfOrderSequenceNumber"], ifaceData.MultilinkInterfaceErrors.OutOfOrderSequenceNumber.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["OutOfRangeSequenceNumber"], ifaceData.MultilinkInterfaceErrors.OutOfRangeSequenceNumber.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["DataMemoryError"], ifaceData.MultilinkInterfaceErrors.DataMemoryError.Text, ifaceLabels...)
+		newCounter(ch, ifaceDesc["ControlMemoryError"], ifaceData.MultilinkInterfaceErrors.ControlMemoryError.Text, ifaceLabels...)
 	}
 	return nil
 }
@@ -381,7 +407,7 @@ type ifacePhysical struct {
 	AdminStatus ifaceText `xml:"admin-status"`
 	OperStatus  ifaceText `xml:"oper-status"`
 	// Mtu         ifaceText `xml:"mtu"`
-	// Speed       ifaceText `xml:"speed"`
+	Speed ifaceText `xml:"speed"`
 	// LinkType    ifaceText `xml:"link-type"`
 	// UpHoldTime               ifaceText                   `xml:"up-hold-time"`
 	// DownHoldTime             ifaceText                   `xml:"down-hold-time"`

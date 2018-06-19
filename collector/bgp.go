@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"strings"
@@ -12,11 +13,12 @@ import (
 var (
 	bgpSubsystem = "bgp"
 
-	bgpPeerLabels    = []string{"peer"}
-	bgpRIBLabels     = []string{"address_family"}
-	bgpPeerRIBLabels = append(bgpPeerLabels, bgpRIBLabels...)
-	bgpNoLabels      = []string{}
-	bgpDesc          = map[string]*prometheus.Desc{
+	bgpPeerLabels     = []string{"peer"}
+	bgpRIBLabels      = []string{"address_family"}
+	bgpPeerRIBLabels  = append(bgpPeerLabels, bgpRIBLabels...)
+	bgpPeerTypeLabels = []string{"type"}
+	bgpNoLabels       = []string{}
+	bgpDesc           = map[string]*prometheus.Desc{
 		"GroupCount":                       colPromDesc(bgpSubsystem, "groups", "Number of Configured Groups.", bgpNoLabels),
 		"PeerCount":                        colPromDesc(bgpSubsystem, "peers", "Number of Configured Peers.", bgpNoLabels),
 		"DownPeerCount":                    colPromDesc(bgpSubsystem, "down_peers", "Number of Peers that are Down.", bgpNoLabels),
@@ -46,6 +48,7 @@ var (
 		"RIBAcceptedInternalPrefixCount":   colPromDesc(bgpSubsystem, "rib_accepted_internal_prefixes", "Number of Accepted Internal Prefixes in the RIB.", bgpRIBLabels),
 		"RIBSuppressedInternalPrefixCount": colPromDesc(bgpSubsystem, "rib_suppressed_internal_prefixes", "Number of Suppressed Internal Prefixes in the RIB.", bgpRIBLabels),
 		"RIBPendingPrefixCount":            colPromDesc(bgpSubsystem, "rib_pending_prefixes", "Number of Pending Prefixes in the RIB.", bgpRIBLabels),
+		"PeerTypesUp":                      colPromDesc(bgpSubsystem, "peer_types_up", "Total Number of Peer Types that are Up.", bgpPeerTypeLabels),
 	}
 
 	bgpErrors      = []error{}
@@ -100,7 +103,6 @@ func (c *BGPCollector) Collect(ch chan<- prometheus.Metric) {
 		bgpErrors = append(bgpErrors, fmt.Errorf("could not execute netconf RPC call: %s", err))
 		return
 	}
-
 	if err := processBGPNetconfReply(reply, ch); err != nil {
 		totalBGPErrors++
 		bgpErrors = append(bgpErrors, err)
@@ -113,11 +115,25 @@ func processBGPNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric
 	if err := xml.Unmarshal([]byte(reply.RawReply), &netconfReply); err != nil {
 		return fmt.Errorf("could not unmarshal netconf reply xml: %s", err)
 	}
-
+	peerTypes := make(map[string]float64)
 	for _, peerData := range netconfReply.BGPInformation.BGPPeer {
 		peerLabels := []string{strings.TrimSpace(peerData.PeerAddress.Text)}
 		if strings.ToLower(peerData.PeerState.Text) == "established" {
 			ch <- prometheus.MustNewConstMetric(bgpDesc["PeerPeerState"], prometheus.GaugeValue, 1.0, peerLabels...)
+			if peerData.Description.Text != "" {
+				var peerType bgpPeerType
+				if err := json.Unmarshal([]byte(peerData.Description.Text), &peerType); err != nil {
+					goto NoPeerType
+				}
+				if peerType.Type != "" {
+					if _, exists := peerTypes[strings.TrimSpace(peerType.Type)]; exists {
+						peerTypes[strings.TrimSpace(peerType.Type)]++
+					} else {
+						peerTypes[strings.TrimSpace(peerType.Type)] = 1
+					}
+				}
+			}
+		NoPeerType:
 		} else {
 			ch <- prometheus.MustNewConstMetric(bgpDesc["PeerPeerState"], prometheus.GaugeValue, 0.0, peerLabels...)
 		}
@@ -133,6 +149,10 @@ func processBGPNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric
 			newGauge(ch, bgpDesc["PeerRIBAcceptedPrefixCount"], ribData.AcceptedPrefixCount.Text, peerRIBLabels...)
 			newGauge(ch, bgpDesc["PeerRIBSuppressedPrefixCount"], ribData.SuppressedPrefixCount.Text, peerRIBLabels...)
 		}
+
+	}
+	for peerType, count := range peerTypes {
+		ch <- prometheus.MustNewConstMetric(bgpDesc["PeerTypesUp"], prometheus.GaugeValue, count, peerType)
 	}
 
 	newGauge(ch, bgpDesc["GroupCount"], netconfReply.BGPInformation.GroupCount.Text)
@@ -158,6 +178,7 @@ func processBGPNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric
 		newGauge(ch, bgpDesc["RIBSuppressedInternalPrefixCount"], ribData.SuppressedInternalPrefixCount.Text, ribLabels...)
 		newGauge(ch, bgpDesc["RIBPendingPrefixCount"], ribData.PendingPrefixCount.Text, ribLabels...)
 	}
+
 	return nil
 }
 
@@ -210,6 +231,7 @@ type bgpPeer struct {
 	OutputMessages  bgpText      `xml:"output-messages"`
 	RouteQueueCount bgpText      `xml:"route-queue-count"`
 	FlapCount       bgpText      `xml:"flap-count"`
+	Description     bgpText      `xml:"description"`
 	ElapsedTime     bgpSeconds   `xml:"elapsed-time"`
 	PeerState       bgpText      `xml:"peer-state"`
 	BGPRIB          []bgpPeerRIB `xml:"bgp-rib"`
@@ -221,4 +243,8 @@ type bgpPeerRIB struct {
 	ReceivedPrefixCount   bgpText `xml:"received-prefix-count"`
 	AcceptedPrefixCount   bgpText `xml:"accepted-prefix-count"`
 	SuppressedPrefixCount bgpText `xml:"suppressed-prefix-count"`
+}
+
+type bgpPeerType struct {
+	Type string `json:"type"`
 }

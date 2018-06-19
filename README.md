@@ -12,7 +12,7 @@ scrape_configs:
       - targets:
         - device1
     params:
-      config: default
+      config: ['default']
     relabel_configs:
       - source_labels: [__address__]
         target_label: __param_target
@@ -27,8 +27,9 @@ Docker:
 docker run --restart unless-stopped -d -p 9347:9347 -v /home/user/.ssh/ssh_key:/ssh_key  -v /home/user/config.yaml:/config.yaml junos_exporter
 ```
 The above Docker commands assumes a configuration file that specifies the SSK key as /ssh_key is located locally in /home/user/config.yaml.
+
 ## Configuration file
-Junos exporter requires a configuration file in the below format:
+Junos Exporter requires a configuration file in the below format:
 ```
 configs:
   default:                  # Name of the configuration
@@ -83,6 +84,17 @@ Global applies to all configs, where that configuration item has not already bee
 The below metrics are currently implemented.
 - Interface Statistics, from `show interface extensive`.
 - BGP, from `show bgp summary`.
+
+### BGP: junos_bgp_peer_types_up
+Junos Exporter exposes a special metric, `junos_bgp_peer_types_up`, that can be used in scenarios where you want to create Prometheus queries that report on the number of types of BGP peers that are currently established, such as for Alert Manager. To implement this metric, a JSON formatted description with a 'type' element must be configured on your BGP group. Junos Exporter will then aggregate all BGP peers that are currently established and configured with that type.
+
+For example, if you want to know how many BGP peers are currently established that provide internet, you'd set the description of all BGP groups that provide internet to `{"type":"internet"}` and query Prometheus with `junos_bgp_peer_types_up{type="internet"})`. Going further, if you want to create an alert when the number of established BGP peers that provide internet is 1 or less, you'd use `sum(junos_bgp_peer_types_up{type="internet"}) <= 1`.  
+
+Example Junos configuration:
+```
+set protocols bgp group internet-provider1 description "{\"type\":\"internet\"}"
+set protocols bgp group internet-provider2 description "{\"type\":\"internet\"}"
+```
 
 ## Development
 ### Building
