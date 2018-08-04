@@ -38,6 +38,18 @@ func initCollectors() {
 		Errors:        bgp,
 		Name:          bgp.Name(),
 	})
+	env := collector.NewEnvCollector()
+	collectors = append(collectors, &collector.Collector{
+		PromCollector: env,
+		Errors:        env,
+		Name:          env.Name(),
+	})
+	power := collector.NewPowerCollector()
+	collectors = append(collectors, &collector.Collector{
+		PromCollector: power,
+		Errors:        power,
+		Name:          power.Name(),
+	})
 }
 
 func validateRequest(configParam string, targetParam string) error {

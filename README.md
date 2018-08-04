@@ -42,6 +42,8 @@ configs:
     enabled_collectors:     # Which collectors to enable. Required.
       - bgp
       - interface
+      - environment
+      - power
 global:
   timeout:                  # SSH Timeout in seconds, globally configured. Optional.
   allowed_targets:          # List of targets that can be collected, globally configured. Optional.
@@ -84,6 +86,8 @@ Global applies to all configs, where that configuration item has not already bee
 The below metrics are currently implemented.
 - Interface Statistics, from `show interface extensive`.
 - BGP, from `show bgp summary`.
+- Environment, from `show chassis environment`.
+- Power, from `show chassis power detail`.
 
 ### BGP: junos_bgp_peer_types_up
 Junos Exporter exposes a special metric, `junos_bgp_peer_types_up`, that can be used in scenarios where you want to create Prometheus queries that report on the number of types of BGP peers that are currently established, such as for Alert Manager. To implement this metric, a JSON formatted description with a 'type' element must be configured on your BGP group. Junos Exporter will then aggregate all BGP peers that are currently established and configured with that type.
