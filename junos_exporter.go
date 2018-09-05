@@ -50,6 +50,12 @@ func initCollectors() {
 		Errors:        power,
 		Name:          power.Name(),
 	})
+	re := collector.NewRECollector()
+	collectors = append(collectors, &collector.Collector{
+		PromCollector: re,
+		Errors:        re,
+		Name:          re.Name(),
+	})
 }
 
 func validateRequest(configParam string, targetParam string) error {

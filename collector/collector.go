@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -151,5 +152,17 @@ func newCounter(ch chan<- prometheus.Metric, descName *prometheus.Desc, metric s
 			log.Errorf("could not convert metric to float64: %s", err)
 		}
 		ch <- prometheus.MustNewConstMetric(descName, prometheus.CounterValue, i, labels...)
+	}
+}
+
+func newGuageMB(ch chan<- prometheus.Metric, descName *prometheus.Desc, metric string, labels ...string) {
+	if metric != "" {
+		re := regexp.MustCompile("[0-9]+")
+		i, err := strconv.ParseFloat(strings.TrimSpace(re.FindString(metric)), 64)
+		if err != nil {
+			log.Errorf("could not convert metric to float64: %s", err)
+		}
+
+		ch <- prometheus.MustNewConstMetric(descName, prometheus.GaugeValue, i*1000000, labels...)
 	}
 }
