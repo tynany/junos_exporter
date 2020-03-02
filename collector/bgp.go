@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/Juniper/go-netconf/netconf"
@@ -32,6 +33,7 @@ var (
 		"PeerRIBReceivedPrefixCount":       colPromDesc(bgpSubsystem, "peer_rib_received_prefixes", "Number of Received Prefixes for the Peer.", bgpPeerRIBLabels),
 		"PeerRIBAcceptedPrefixCount":       colPromDesc(bgpSubsystem, "peer_rib_accepted_prefixes", "Number of Accepted Prefixes for the Peer.", bgpPeerRIBLabels),
 		"PeerRIBSuppressedPrefixCount":     colPromDesc(bgpSubsystem, "peer_rib_suppressed_prefixes", "Number of Suppressed Prefixes for the Peer.", bgpPeerRIBLabels),
+		"PeerRIBAdvertisedPrefixCount":     colPromDesc(bgpSubsystem, "peer_rib_advertised_prefixes", "Number of Advertised Prefixes for the Peer.", bgpPeerLabels),
 		"RIBTotalPrefixCount":              colPromDesc(bgpSubsystem, "rib_total_prefixes", "Total Number of Prefixes in the RIB.", bgpRIBLabels),
 		"RIBReceivedPrefixCount":           colPromDesc(bgpSubsystem, "rib_received_prefixes", "Number of Received Prefixes in the RIB.", bgpRIBLabels),
 		"RIBAcceptedPrefixCount":           colPromDesc(bgpSubsystem, "rib_accepted_prefixes", "Number of Accepted Prefixes in the RIB.", bgpRIBLabels),
@@ -103,10 +105,37 @@ func (c *BGPCollector) Collect(ch chan<- prometheus.Metric) {
 		bgpErrors = append(bgpErrors, fmt.Errorf("could not execute netconf RPC call: %s", err))
 		return
 	}
+
+	replyNeighbor, err := s.Exec(netconf.RawMethod(`<get-bgp-neighbor-information/>`))
+	if err != nil {
+		totalBGPErrors++
+		bgpErrors = append(bgpErrors, fmt.Errorf("could not execute netconf RPC call: %s", err))
+		return
+	}
+
 	if err := processBGPNetconfReply(reply, ch); err != nil {
 		totalBGPErrors++
 		bgpErrors = append(bgpErrors, err)
 	}
+
+	if err := processBGPNeighborNetconfReply(replyNeighbor, ch); err != nil {
+		totalBGPErrors++
+		bgpErrors = append(bgpErrors, err)
+	}
+}
+
+func processBGPNeighborNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric) error {
+	var netconfReply bgpNeighborRPCReply
+
+	if err := xml.Unmarshal([]byte(reply.RawReply), &netconfReply); err != nil {
+		return fmt.Errorf("could not unmarshal netconf reply xml: %s", err)
+	}
+	for _, peerData := range netconfReply.BgpInformation.BgpPeer {
+		re := regexp.MustCompile(`\+.*`)
+		peerLabels := []string{re.ReplaceAllString(strings.TrimSpace(peerData.PeerAddress), "")}
+		newGauge(ch, bgpDesc["PeerRIBAdvertisedPrefixCount"], peerData.BgpRib.AdvertisedPrefixCount, peerLabels...)
+	}
+	return nil
 }
 
 func processBGPNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric) error {
@@ -180,6 +209,24 @@ func processBGPNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric
 	}
 
 	return nil
+}
+
+type bgpNeighborRPCReply struct {
+	XMLName        xml.Name               `xml:"rpc-reply"`
+	BgpInformation bgpNeighborInformation `xml:"bgp-information"`
+}
+
+type bgpNeighborInformation struct {
+	BgpPeer []bgpNeighborPeer `xml:"bgp-peer"`
+}
+
+type bgpNeighborPeer struct {
+	PeerAddress string         `xml:"peer-address"`
+	BgpRib      bgpNeighborRIB `xml:"bgp-rib"`
+}
+
+type bgpNeighborRIB struct {
+	AdvertisedPrefixCount string `xml:"advertised-prefix-count"`
 }
 
 type bgpRPCReply struct {
