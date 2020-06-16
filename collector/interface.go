@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"strconv"
@@ -13,7 +14,7 @@ import (
 var (
 	ifaceSubsystem = "interface"
 
-	ifacePhysicalLabels = []string{"interface"}
+	ifacePhysicalLabels = []string{"interface", "type"}
 	ifacePRECLClass     = append(ifacePhysicalLabels, "class")
 	ifaceDesc           = map[string]*prometheus.Desc{
 		"Up":                                       colPromDesc(ifaceSubsystem, "up", "Whether the interface is up (1 = up, 0 = down).", ifacePhysicalLabels),
@@ -214,7 +215,11 @@ func processIfaceNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metr
 		return fmt.Errorf("could not unmarshal netconf reply xml: %s", err)
 	}
 	for _, ifaceData := range netconfReply.InterfaceInformation.PhysicalInterface {
-		ifaceLabels := []string{strings.TrimSpace(ifaceData.Name.Text)}
+		var ifaceDescr ifaceDescription
+		if err := json.Unmarshal([]byte(ifaceData.Description.Text), &ifaceDescr); err != nil {
+			ifaceDescr.Type = ""
+		}
+		ifaceLabels := []string{strings.TrimSpace(ifaceData.Name.Text), ifaceDescr.Type}
 		if strings.TrimSpace(ifaceData.AdminStatus.Text) == "up" {
 			if strings.TrimSpace(ifaceData.OperStatus.Text) == "up" {
 				ch <- prometheus.MustNewConstMetric(ifaceDesc["Up"], prometheus.GaugeValue, 1.0, ifaceLabels...)
@@ -271,7 +276,7 @@ func processIfaceNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metr
 		newCounter(ch, ifaceDesc["HsLinkCrcErrors"], ifaceData.OutputErrorList.HsLinkCrcErrors.Text, ifaceLabels...)
 		newCounter(ch, ifaceDesc["OutputFifoErrors"], ifaceData.OutputErrorList.OutputFifoErrors.Text, ifaceLabels...)
 		for _, logIface := range ifaceData.LogicalInterfaces {
-			logIfaceLabels := []string{strings.TrimSpace(logIface.Name.Text)}
+			logIfaceLabels := []string{strings.TrimSpace(logIface.Name.Text), ""} // set type to empty for sub interfaces
 			newCounter(ch, ifaceDesc["InputBytes"], logIface.TrafficStatistics.InputBytes.Text, logIfaceLabels...)
 			newCounter(ch, ifaceDesc["OutputBytes"], logIface.TrafficStatistics.OutputBytes.Text, logIfaceLabels...)
 			newCounter(ch, ifaceDesc["InputPackets"], logIface.TrafficStatistics.InputPackets.Text, logIfaceLabels...)
@@ -402,10 +407,15 @@ type ifaceInformation struct {
 	PhysicalInterface []ifacePhysical `xml:"physical-interface"`
 }
 
+type ifaceDescription struct {
+	// only pull the non-dymanic interface 'type' element from description
+	Type string `json:"type"`
+}
 type ifacePhysical struct {
 	Name        ifaceText `xml:"name"`
 	AdminStatus ifaceText `xml:"admin-status"`
 	OperStatus  ifaceText `xml:"oper-status"`
+	Description ifaceText `xml:"description"`
 	// Mtu         ifaceText `xml:"mtu"`
 	Speed ifaceText `xml:"speed"`
 	// LinkType    ifaceText `xml:"link-type"`
