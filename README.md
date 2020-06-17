@@ -44,6 +44,8 @@ configs:
       - interface
       - environment
       - power
+    interface_description_keys: # list of JSON keys in the interface description to include in physical interface metrics
+      - type
 global:
   timeout:                  # SSH Timeout in seconds, globally configured. Optional.
   allowed_targets:          # List of targets that can be collected, globally configured. Optional.

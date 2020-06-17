@@ -23,6 +23,8 @@ var (
 	collectors        = []*collector.Collector{}
 	exporterSSHConfig = map[string]collector.SSHConfig{}
 	collectorConfig   *config.Configuration
+
+	interfaceDescriptionKeys []string
 )
 
 func initCollectors() {
@@ -116,9 +118,13 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		log.Errorf("could not set connection details: %s", err)
 		return
 	}
+	if err := ne.SetIfaceDescrKeys(interfaceDescriptionKeys); err != nil {
+		log.Errorf("could not set interface decription keys: %s", err)
+		return
+	}
 	registry.Register(ne)
 
-	gatheres := prometheus.Gatherers{
+	gatherers := prometheus.Gatherers{
 		prometheus.DefaultGatherer,
 		registry,
 	}
@@ -126,7 +132,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		ErrorLog:      log.NewErrorLogger(),
 		ErrorHandling: promhttp.ContinueOnError,
 	}
-	promhttp.HandlerFor(gatheres, handlerOpts).ServeHTTP(w, r)
+	promhttp.HandlerFor(gatherers, handlerOpts).ServeHTTP(w, r)
 }
 
 func parseCLI() {
@@ -164,6 +170,17 @@ func generateSSHConfig() error {
 	return nil
 }
 
+func getInterfaceDescriptionKeys() error {
+	for _, configData := range collectorConfig.Config {
+		if len(configData.InterfaceDescKeys) > 0 {
+			for _, descrKey := range configData.InterfaceDescKeys {
+				interfaceDescriptionKeys = append(interfaceDescriptionKeys, descrKey)
+			}
+		}
+	}
+	return nil
+}
+
 func main() {
 	prometheus.MustRegister(version.NewCollector("junos_exporter"))
 
@@ -184,6 +201,10 @@ func main() {
 
 	if err = generateSSHConfig(); err != nil {
 		log.Errorf("could not generate SSH configuration: %s", err)
+	}
+
+	if err = getInterfaceDescriptionKeys(); err != nil {
+		log.Errorf("could not generate list of interface description keys %s", err)
 	}
 
 	http.HandleFunc(*telemetryPath, handler)

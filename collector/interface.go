@@ -12,11 +12,20 @@ import (
 )
 
 var (
-	ifaceSubsystem = "interface"
+	ifaceSubsystem   = "interface"
+	ifaceErrors      = []error{}
+	totalIfaceErrors = 0.0
+	ifaceDescrKeys   []string
+)
 
-	ifacePhysicalLabels = []string{"interface", "type"}
-	ifacePRECLClass     = append(ifacePhysicalLabels, "class")
-	ifaceDesc           = map[string]*prometheus.Desc{
+func getInterfaceDesc() map[string]*prometheus.Desc {
+	var ifacePhysicalLabels = []string{"interface"}
+	if len(ifaceDescrKeys) > 0 {
+		ifacePhysicalLabels = append(ifacePhysicalLabels, ifaceDescrKeys...)
+	}
+	var ifacePRECLClass = append(ifacePhysicalLabels, "class")
+
+	ifaceDesc := map[string]*prometheus.Desc{
 		"Up":                                       colPromDesc(ifaceSubsystem, "up", "Whether the interface is up (1 = up, 0 = down).", ifacePhysicalLabels),
 		"InterfaceFlapped":                         colPromDesc(ifaceSubsystem, "interface_flapped_seconds", "How long since the last interface flap.", ifacePhysicalLabels),
 		"InputBytes":                               colPromDesc(ifaceSubsystem, "input_bytes", "Input Bytes.", ifacePhysicalLabels),
@@ -149,10 +158,8 @@ var (
 		"FlowInputConnections":                     colPromDesc(ifaceSubsystem, "flow_input_connections", "Flow Input Connections.", ifacePhysicalLabels),
 		"SpeedBytes":                               colPromDesc(ifaceSubsystem, "speed_bytes", "Speed of the Interface in Bytes per Second", ifacePhysicalLabels),
 	}
-
-	ifaceErrors      = []error{}
-	totalIfaceErrors = 0.0
-)
+	return ifaceDesc
+}
 
 // InterfaceCollector collects Iface metrics, implemented as per the Collector iface.
 type InterfaceCollector struct{}
@@ -181,7 +188,7 @@ func (*InterfaceCollector) CollectTotalErrors() float64 {
 
 // Describe all metrics
 func (*InterfaceCollector) Describe(ch chan<- *prometheus.Desc) {
-	for _, desc := range ifaceDesc {
+	for _, desc := range getInterfaceDesc() {
 		ch <- desc
 	}
 }
@@ -215,11 +222,27 @@ func processIfaceNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metr
 		return fmt.Errorf("could not unmarshal netconf reply xml: %s", err)
 	}
 	for _, ifaceData := range netconfReply.InterfaceInformation.PhysicalInterface {
-		var ifaceDescr ifaceDescription
-		if err := json.Unmarshal([]byte(ifaceData.Description.Text), &ifaceDescr); err != nil {
-			ifaceDescr.Type = ""
+		ifaceDesc := getInterfaceDesc()
+		// var ifaceDescr ifaceDescription
+		// if err := json.Unmarshal([]byte(ifaceData.Description.Text), &ifaceDescr); err != nil {
+		// 	ifaceDescr.Type = ""
+		// }
+		ifaceLabels := []string{strings.TrimSpace(ifaceData.Name.Text)}
+
+		var allIfaceKeys map[string]interface{}
+		if err := json.Unmarshal([]byte(ifaceData.Description.Text), &allIfaceKeys); err != nil {
+			allIfaceKeys = nil
 		}
-		ifaceLabels := []string{strings.TrimSpace(ifaceData.Name.Text), ifaceDescr.Type}
+		if len(ifaceDescrKeys) > 0 {
+			for _, configuredKey := range ifaceDescrKeys {
+				if allIfaceKeys[configuredKey] == nil {
+					ifaceLabels = append(ifaceLabels, "")
+				} else {
+					ifaceLabels = append(ifaceLabels, allIfaceKeys[configuredKey].(string))
+				}
+			}
+		}
+
 		if strings.TrimSpace(ifaceData.AdminStatus.Text) == "up" {
 			if strings.TrimSpace(ifaceData.OperStatus.Text) == "up" {
 				ch <- prometheus.MustNewConstMetric(ifaceDesc["Up"], prometheus.GaugeValue, 1.0, ifaceLabels...)
@@ -276,7 +299,11 @@ func processIfaceNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metr
 		newCounter(ch, ifaceDesc["HsLinkCrcErrors"], ifaceData.OutputErrorList.HsLinkCrcErrors.Text, ifaceLabels...)
 		newCounter(ch, ifaceDesc["OutputFifoErrors"], ifaceData.OutputErrorList.OutputFifoErrors.Text, ifaceLabels...)
 		for _, logIface := range ifaceData.LogicalInterfaces {
-			logIfaceLabels := []string{strings.TrimSpace(logIface.Name.Text), ""} // set type to empty for sub interfaces
+			logIfaceLabels := []string{strings.TrimSpace(logIface.Name.Text)}
+			// set additional interface description metrics to an empty string for sub interfaces
+			for j := 0; j < len(ifaceDescrKeys); j++ {
+				logIfaceLabels = append(logIfaceLabels, "")
+			}
 			newCounter(ch, ifaceDesc["InputBytes"], logIface.TrafficStatistics.InputBytes.Text, logIfaceLabels...)
 			newCounter(ch, ifaceDesc["OutputBytes"], logIface.TrafficStatistics.OutputBytes.Text, logIfaceLabels...)
 			newCounter(ch, ifaceDesc["InputPackets"], logIface.TrafficStatistics.InputPackets.Text, logIfaceLabels...)

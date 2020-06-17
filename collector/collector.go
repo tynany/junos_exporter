@@ -87,6 +87,12 @@ func (*Exporters) SetConnectionDetails(config SSHConfig, target string) error {
 	return nil
 }
 
+// SetIfaceDescrKeys sets the optional keys in an interface description to include in metrics
+func (*Exporters) SetIfaceDescrKeys(keys []string) error {
+	ifaceDescrKeys = keys
+	return nil
+}
+
 // Describe implemented as per the prometheus.Collector interface.
 func (e *Exporters) Describe(ch chan<- *prometheus.Desc) {
 	for _, desc := range bgpDesc {
@@ -155,7 +161,7 @@ func newCounter(ch chan<- prometheus.Metric, descName *prometheus.Desc, metric s
 	}
 }
 
-func newGuageMB(ch chan<- prometheus.Metric, descName *prometheus.Desc, metric string, labels ...string) {
+func newGaugeMB(ch chan<- prometheus.Metric, descName *prometheus.Desc, metric string, labels ...string) {
 	if metric != "" {
 		re := regexp.MustCompile("[0-9]+")
 		i, err := strconv.ParseFloat(strings.TrimSpace(re.FindString(metric)), 64)
