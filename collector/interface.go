@@ -223,10 +223,6 @@ func processIfaceNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metr
 	}
 	for _, ifaceData := range netconfReply.InterfaceInformation.PhysicalInterface {
 		ifaceDesc := getInterfaceDesc()
-		// var ifaceDescr ifaceDescription
-		// if err := json.Unmarshal([]byte(ifaceData.Description.Text), &ifaceDescr); err != nil {
-		// 	ifaceDescr.Type = ""
-		// }
 		ifaceLabels := []string{strings.TrimSpace(ifaceData.Name.Text)}
 
 		var allIfaceKeys map[string]interface{}
