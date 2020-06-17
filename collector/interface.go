@@ -429,11 +429,6 @@ type ifaceRPCReply struct {
 type ifaceInformation struct {
 	PhysicalInterface []ifacePhysical `xml:"physical-interface"`
 }
-
-type ifaceDescription struct {
-	// only pull the non-dymanic interface 'type' element from description
-	Type string `json:"type"`
-}
 type ifacePhysical struct {
 	Name        ifaceText `xml:"name"`
 	AdminStatus ifaceText `xml:"admin-status"`
