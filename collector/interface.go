@@ -296,18 +296,31 @@ func processIfaceNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metr
 		newCounter(ch, ifaceDesc["OutputFifoErrors"], ifaceData.OutputErrorList.OutputFifoErrors.Text, ifaceLabels...)
 		for _, logIface := range ifaceData.LogicalInterfaces {
 			logIfaceLabels := []string{strings.TrimSpace(logIface.Name.Text)}
-			// set additional interface description metrics to an empty string for sub interfaces
-			for j := 0; j < len(ifaceDescrKeys); j++ {
-				logIfaceLabels = append(logIfaceLabels, "")
+			if len(ifaceDescrKeys) > 0 {
+				for _, configuredKey := range ifaceDescrKeys {
+					if allIfaceKeys[configuredKey] == nil {
+						logIfaceLabels = append(logIfaceLabels, "")
+					} else {
+						logIfaceLabels = append(logIfaceLabels, allIfaceKeys[configuredKey].(string))
+					}
+				}
 			}
-			newCounter(ch, ifaceDesc["InputBytes"], logIface.TrafficStatistics.InputBytes.Text, logIfaceLabels...)
-			newCounter(ch, ifaceDesc["OutputBytes"], logIface.TrafficStatistics.OutputBytes.Text, logIfaceLabels...)
-			newCounter(ch, ifaceDesc["InputPackets"], logIface.TrafficStatistics.InputPackets.Text, logIfaceLabels...)
-			newCounter(ch, ifaceDesc["OutputPackets"], logIface.TrafficStatistics.OutputPackets.Text, logIfaceLabels...)
-			newCounter(ch, ifaceDesc["V6InputBytes"], logIface.TrafficStatistics.Ipv6TransitStatistics.InputBytes.Text, logIfaceLabels...)
-			newCounter(ch, ifaceDesc["V6OutputBytes"], logIface.TrafficStatistics.Ipv6TransitStatistics.OutputBytes.Text, logIfaceLabels...)
-			newCounter(ch, ifaceDesc["V6InputPackets"], logIface.TrafficStatistics.Ipv6TransitStatistics.InputPackets.Text, logIfaceLabels...)
-			newCounter(ch, ifaceDesc["V6OutputPackets"], logIface.TrafficStatistics.Ipv6TransitStatistics.OutputPackets.Text, logIfaceLabels...)
+			trafficStatsSource := logIface.TransitTrafficStatistics
+			if logIface.LAGTrafficStatistics.LagBundle.InputBps.Text != "" {
+				trafficStatsSource = logIface.LAGTrafficStatistics.LagBundle
+			}
+			newCounter(ch, ifaceDesc["InputBytes"], trafficStatsSource.InputBytes.Text, logIfaceLabels...)
+			newCounter(ch, ifaceDesc["OutputBytes"], trafficStatsSource.OutputBytes.Text, logIfaceLabels...)
+			newCounter(ch, ifaceDesc["InputPackets"], trafficStatsSource.InputPackets.Text, logIfaceLabels...)
+			newCounter(ch, ifaceDesc["OutputPackets"], trafficStatsSource.OutputPackets.Text, logIfaceLabels...)
+			newGauge(ch, ifaceDesc["InputBps"], trafficStatsSource.InputBps.Text, logIfaceLabels...)
+			newGauge(ch, ifaceDesc["OutputBps"], trafficStatsSource.OutputBps.Text, logIfaceLabels...)
+			newGauge(ch, ifaceDesc["InputPps"], trafficStatsSource.InputPps.Text, logIfaceLabels...)
+			newGauge(ch, ifaceDesc["OutputPps"], trafficStatsSource.OutputPps.Text, logIfaceLabels...)
+			newCounter(ch, ifaceDesc["V6InputBytes"], trafficStatsSource.Ipv6TransitStatistics.InputBytes.Text, logIfaceLabels...)
+			newCounter(ch, ifaceDesc["V6OutputBytes"], trafficStatsSource.Ipv6TransitStatistics.OutputBytes.Text, logIfaceLabels...)
+			newCounter(ch, ifaceDesc["V6InputPackets"], trafficStatsSource.Ipv6TransitStatistics.InputPackets.Text, logIfaceLabels...)
+			newCounter(ch, ifaceDesc["V6OutputPackets"], trafficStatsSource.Ipv6TransitStatistics.OutputPackets.Text, logIfaceLabels...)
 			newCounter(ch, ifaceDesc["FlowErrorAddressSpoofing"], logIface.SecurityErrorFlowStatistics.FlowErrorAddressSpoofing.Text, logIfaceLabels...)
 			newCounter(ch, ifaceDesc["FlowErrorAuthenticationFailed"], logIface.SecurityErrorFlowStatistics.FlowErrorAuthenticationFailed.Text, logIfaceLabels...)
 			newCounter(ch, ifaceDesc["FlowErrorIncomingNat"], logIface.SecurityErrorFlowStatistics.FlowErrorIncomingNat.Text, logIfaceLabels...)
@@ -568,11 +581,12 @@ type ifaceSTPTrafficStats struct {
 type ifaceLogical struct {
 	Name              ifaceText             `xml:"name"`
 	TrafficStatistics ifaceInOutBytesPktsV6 `xml:"traffic-statistics"`
-	// LocalTrafficStatistics   ifaceInOutBytesPkts         `xml:"local-traffic-statistics"`
-	// TransitTrafficStatistics ifaceInOutBytesPktsBPSPPSV6 `xml:"transit-traffic-statistics"`
-	SecurityInputFlowStatistics  ifaceSecInFlow    `xml:"security-input-flow-statistics"`
-	SecurityOutputFlowStatistics ifaceSecOutFlow   `xml:"security-output-flow-statistics"`
-	SecurityErrorFlowStatistics  ifaceSecErrorFlow `xml:"security-error-flow-statistics"`
+	// LocalTrafficStatistics       ifaceInOutBytesPkts         `xml:"local-traffic-statistics"`
+	TransitTrafficStatistics     ifaceInOutBytesPktsBPSPPSV6 `xml:"transit-traffic-statistics"`
+	LAGTrafficStatistics         ifaceLAGTrafficStats        `xml:"lag-traffic-statistics"`
+	SecurityInputFlowStatistics  ifaceSecInFlow              `xml:"security-input-flow-statistics"`
+	SecurityOutputFlowStatistics ifaceSecOutFlow             `xml:"security-output-flow-statistics"`
+	SecurityErrorFlowStatistics  ifaceSecErrorFlow           `xml:"security-error-flow-statistics"`
 }
 
 type ifaceSecErrorFlow struct {
@@ -664,6 +678,10 @@ type ifaceLogicalTrafficStats struct {
 	InputPackets          ifaceText           `xml:"input-packets"`
 	OutputPackets         ifaceText           `xml:"output-packets"`
 	Ipv6TransitStatistics ifaceInOutBytesPkts `xml:"ipv6-transit-statistics"`
+}
+
+type ifaceLAGTrafficStats struct {
+	LagBundle ifaceInOutBytesPktsBPSPPSV6 `xml:"lag-bundle"`
 }
 
 type ifaceOutputErrorList struct {
