@@ -15,7 +15,6 @@ var (
 	ifaceSubsystem   = "interface"
 	ifaceErrors      = []error{}
 	totalIfaceErrors = 0.0
-	ifaceDescrKeys   []string
 )
 
 func getInterfaceDesc() map[string]*prometheus.Desc {

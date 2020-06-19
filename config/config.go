@@ -28,8 +28,9 @@ type Config struct {
 
 // Global contains the global information required by junos_collector to create SSH based NETCONF connections.
 type Global struct {
-	AllowedTargets []string `yaml:"allowed_targets"`
-	Timeout        int      `yaml:"timeout"`
+	AllowedTargets    []string `yaml:"allowed_targets"`
+	Timeout           int      `yaml:"timeout"`
+	InterfaceDescKeys []string `yaml:"interface_description_keys"`
 }
 
 // LoadConfigFile returns a Configs type from a passed file.

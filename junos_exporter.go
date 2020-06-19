@@ -24,7 +24,7 @@ var (
 	exporterSSHConfig = map[string]collector.SSHConfig{}
 	collectorConfig   *config.Configuration
 
-	interfaceDescriptionKeys []string
+	interfaceDescriptionKeys = map[string][]string{}
 )
 
 func initCollectors() {
@@ -118,10 +118,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		log.Errorf("could not set connection details: %s", err)
 		return
 	}
-	if err := ne.SetIfaceDescrKeys(interfaceDescriptionKeys); err != nil {
-		log.Errorf("could not set interface decription keys: %s", err)
-		return
-	}
+	ne.SetIfaceDescrKeys(interfaceDescriptionKeys[configParam])
 	registry.Register(ne)
 
 	gatherers := prometheus.Gatherers{
@@ -170,15 +167,24 @@ func generateSSHConfig() error {
 	return nil
 }
 
-func getInterfaceDescriptionKeys() error {
-	for _, configData := range collectorConfig.Config {
-		if len(configData.InterfaceDescKeys) > 0 {
-			for _, descrKey := range configData.InterfaceDescKeys {
-				interfaceDescriptionKeys = append(interfaceDescriptionKeys, descrKey)
+func getInterfaceDescriptionKeys() {
+	var globalIfaceDesc []string
+	if len(interfaceDescriptionKeys) == 0 {
+		if len(collectorConfig.Global.InterfaceDescKeys) > 0 {
+			for _, descrKey := range collectorConfig.Global.InterfaceDescKeys {
+				globalIfaceDesc = append(globalIfaceDesc, descrKey)
 			}
 		}
 	}
-	return nil
+	for name, configData := range collectorConfig.Config {
+		if len(configData.InterfaceDescKeys) > 0 {
+			for _, descrKey := range configData.InterfaceDescKeys {
+				interfaceDescriptionKeys[name] = append(interfaceDescriptionKeys[name], descrKey)
+			}
+		} else {
+			interfaceDescriptionKeys[name] = globalIfaceDesc
+		}
+	}
 }
 
 func main() {
@@ -203,9 +209,7 @@ func main() {
 		log.Errorf("could not generate SSH configuration: %s", err)
 	}
 
-	if err = getInterfaceDescriptionKeys(); err != nil {
-		log.Errorf("could not generate list of interface description keys %s", err)
-	}
+	getInterfaceDescriptionKeys()
 
 	http.HandleFunc(*telemetryPath, handler)
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
