@@ -17,18 +17,20 @@ type Configuration struct {
 
 // Config contains the information required by junos_collector to create SSH based NETCONF connections.
 type Config struct {
-	Username       string   `yaml:"username"`
-	Timeout        int      `yaml:"timeout"`
-	Password       string   `yaml:"password"`
-	SSHKey         string   `yaml:"ssh_key"`
-	AllowedTargets []string `yaml:"allowed_targets"`
-	Collectors     []string `yaml:"enabled_collectors"`
+	Username          string   `yaml:"username"`
+	Timeout           int      `yaml:"timeout"`
+	Password          string   `yaml:"password"`
+	SSHKey            string   `yaml:"ssh_key"`
+	AllowedTargets    []string `yaml:"allowed_targets"`
+	Collectors        []string `yaml:"enabled_collectors"`
+	InterfaceDescKeys []string `yaml:"interface_description_keys"`
 }
 
 // Global contains the global information required by junos_collector to create SSH based NETCONF connections.
 type Global struct {
-	AllowedTargets []string `yaml:"allowed_targets"`
-	Timeout        int      `yaml:"timeout"`
+	AllowedTargets    []string `yaml:"allowed_targets"`
+	Timeout           int      `yaml:"timeout"`
+	InterfaceDescKeys []string `yaml:"interface_description_keys"`
 }
 
 // LoadConfigFile returns a Configs type from a passed file.
