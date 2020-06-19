@@ -1,0 +1,19 @@
+version: 2
+jobs:
+  release:
+    working_directory: /go/src/github.com/tynany/frr_exporter
+    docker:
+      - image: circleci/golang:1.13.12
+    steps:
+      - checkout
+      - run: curl -sL https://git.io/goreleaser | bash
+workflows:
+  version: 2
+  release:
+    jobs:
+      - release:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*(-.*)*/

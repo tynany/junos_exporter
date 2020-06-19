@@ -44,12 +44,14 @@ configs:
       - interface
       - environment
       - power
-    interface_description_keys: # list of JSON keys in the interface description to include in physical interface metrics
-      - type
+    interface_description_keys: # List of JSON keys in the interface description to include as labels for physical interface metrics
+      - 
 global:
   timeout:                  # SSH Timeout in seconds, globally configured. Optional.
   allowed_targets:          # List of targets that can be collected, globally configured. Optional.
-   -
+    -
+  interface_description_keys # List of JSON keys in the interface description to include as labels for physical interface metrics, globally configured. Optional.
+    - 
 ```
 ### Example
 ```
@@ -101,6 +103,15 @@ Example Junos configuration:
 ```
 set protocols bgp group internet-provider1 description "{\"type\":\"internet\"}"
 set protocols bgp group internet-provider2 description "{\"type\":\"internet\"}"
+```
+
+### Interface: Descriptions
+It's possible to use interface descriptions as metric labels by specifying `interface_description_keys` in the config or global section of the configuration. This tells the exporter to look at the JSON formatted description of all interfaces, extract the value of the specified key, and add it as a label to all interface metrics. This is useful when automating Prometheus alert rules or Dashboards. For example, the Prometheus query `sum(junos_interface_input_bps{"type"="internet"}) > 10000` can be used to create a rule that triggers when the combined BPS of all internet interfaces is above 10000.
+
+Example Junos configuration:
+```
+set interfaces ge-0/0/0 description "{\"type\":\"internet\"}"
+set interfaces ge-0/0/1 description "{\"type\":\"internet\"}"
 ```
 
 ## Development
