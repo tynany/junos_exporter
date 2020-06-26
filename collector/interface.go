@@ -157,6 +157,9 @@ func getInterfaceDesc() map[string]*prometheus.Desc {
 	if len(ifaceDescrKeys) > 0 {
 		ifaceDesc["InterfaceDescription"] = 		colPromDesc(ifaceSubsystem, "interface_description", "Interface description keys", append([]string{"interface"}, ifaceDescrKeys...))
 	}
+	for _, metricKey := range ifaceMetricKeys {
+		ifaceDesc[metricKey] = 		colPromDesc(ifaceSubsystem, strings.ToLower(metricKey), "User-defined Metric from Description Key", append([]string{"interface"}))
+	}
 	return ifaceDesc
 }
 
@@ -247,12 +250,12 @@ func processIfaceNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metr
 			}
 		}
 
+		var allIfaceDescrKeys map[string]interface{}
+		if err := json.Unmarshal([]byte(ifaceData.Description.Text), &allIfaceDescrKeys); err != nil {
+			allIfaceDescrKeys = nil
+		}
 		if len(ifaceDescrKeys) > 0 {
 			ifaceDescrLabels := []string{strings.TrimSpace(ifaceData.Name.Text)}
-			var allIfaceDescrKeys map[string]interface{}
-			if err := json.Unmarshal([]byte(ifaceData.Description.Text), &allIfaceDescrKeys); err != nil {
-				allIfaceDescrKeys = nil
-			}
 			for _, configuredKey := range ifaceDescrKeys {
 				if allIfaceDescrKeys[configuredKey] == nil {
 					ifaceDescrLabels = append(ifaceDescrLabels, "")
@@ -261,6 +264,11 @@ func processIfaceNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metr
 				}
 			}
 			newCounter(ch, ifaceDesc["InterfaceDescription"], "1", ifaceDescrLabels...)
+		}
+		for _, configuredKey := range ifaceMetricKeys {
+			if allIfaceDescrKeys[configuredKey] != nil {
+				newCounter(ch, ifaceDesc[configuredKey], strings.TrimSpace(allIfaceDescrKeys[configuredKey].(string)), strings.TrimSpace(ifaceData.Name.Text))				
+			}
 		}
 		newCounter(ch, ifaceDesc["InterfaceFlapped"], ifaceData.InterfaceFlapped.Seconds, ifaceLabels...)
 		newCounter(ch, ifaceDesc["InputBytes"], ifaceData.TrafficStatistics.InputBytes.Text, ifaceLabels...)
@@ -297,12 +305,13 @@ func processIfaceNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metr
 		newCounter(ch, ifaceDesc["OutputFifoErrors"], ifaceData.OutputErrorList.OutputFifoErrors.Text, ifaceLabels...)
 		for _, logIface := range ifaceData.LogicalInterfaces {
 			logIfaceLabels := []string{strings.TrimSpace(logIface.Name.Text)}
+			var allIfaceDescrKeys map[string]interface{}
+			if err := json.Unmarshal([]byte(logIface.Description.Text), &allIfaceDescrKeys); err != nil {
+				allIfaceDescrKeys = nil
+			}
 			if len(ifaceDescrKeys) > 0 {
 				ifaceDescrLabels := []string{strings.TrimSpace(logIface.Name.Text)}
-				var allIfaceDescrKeys map[string]interface{}
-				if err := json.Unmarshal([]byte(logIface.Description.Text), &allIfaceDescrKeys); err != nil {
-					allIfaceDescrKeys = nil
-				}
+				
 				for _, configuredKey := range ifaceDescrKeys {
 					if allIfaceDescrKeys[configuredKey] == nil {
 						ifaceDescrLabels = append(ifaceDescrLabels, "")
@@ -311,6 +320,11 @@ func processIfaceNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metr
 					}
 				}
 				newCounter(ch, ifaceDesc["InterfaceDescription"], "1", ifaceDescrLabels...)
+			}
+			for _, configuredKey := range ifaceMetricKeys {
+				if allIfaceDescrKeys[configuredKey] != nil {
+					newCounter(ch, ifaceDesc[configuredKey], strings.TrimSpace(allIfaceDescrKeys[configuredKey].(string)), strings.TrimSpace(logIface.Name.Text))				
+				}
 			}
 			trafficStatsSource := logIface.TransitTrafficStatistics
 			if logIface.LAGTrafficStatistics.LagBundle.InputBps.Text != "" {
