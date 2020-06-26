@@ -155,7 +155,7 @@ func getInterfaceDesc() map[string]*prometheus.Desc {
 		"SpeedBytes":                               colPromDesc(ifaceSubsystem, "speed_bytes", "Speed of the Interface in Bytes per Second", ifacePhysicalLabels),
 	}
 	if len(ifaceDescrKeys) > 0 {
-		ifaceDesc["InterfaceDescription"] = 		colPromDesc(ifaceSubsystem, "interface_description", "Interface description keys", append([]string{"interface"}, ifaceDescrKeys...))
+		ifaceDesc["InterfaceDescription"] = 		colPromDesc(ifaceSubsystem, "description", "Interface description keys", append([]string{"interface"}, ifaceDescrKeys...))
 	}
 	for _, metricKey := range ifaceMetricKeys {
 		ifaceDesc[metricKey] = 		colPromDesc(ifaceSubsystem, strings.ToLower(metricKey), "User-defined Metric from Description Key", append([]string{"interface"}))
