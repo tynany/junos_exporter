@@ -30,6 +30,7 @@ var (
 	sshClientConfig *ssh.ClientConfig
 	sshTarget       string
 	ifaceDescrKeys  []string
+	ifaceMetricKeys  []string
 )
 
 // CollectErrors is used to collect collector errors.
@@ -88,9 +89,14 @@ func (*Exporters) SetConnectionDetails(config SSHConfig, target string) error {
 	return nil
 }
 
-// SetIfaceDescrKeys sets the optional keys in an interface description to include in metrics
+// SetIfaceDescrKeys sets the optional keys in an interface description to include in the generated interface_description metric
 func (*Exporters) SetIfaceDescrKeys(keys []string) {
 	ifaceDescrKeys = keys
+}
+
+// SetIfaceMetricKeys sets the optional keys in an interface description to include in generated per-key metrics
+func (*Exporters) SetIfaceMetricKeys(keys []string) {
+	ifaceMetricKeys = keys
 }
 
 // Describe implemented as per the prometheus.Collector interface.
