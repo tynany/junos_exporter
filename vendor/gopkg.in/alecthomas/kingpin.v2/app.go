@@ -218,12 +218,8 @@ func (a *Application) Parse(args []string) (command string, err error) {
 		if setValuesErr != nil {
 			return "", setValuesErr
 		}
-		fmt.Printf("err1 %v\n",err)
-		fmt.Printf("sel1 %v\n",selected)
-		command, err = a.execute(context, selected)
-		fmt.Printf("err2 %v\n",err)
-		fmt.Printf("command %v\n",command)
 
+		command, err = a.execute(context, selected)
 		if err == ErrCommandNotSpecified {
 			a.writeUsage(context, nil)
 		}
@@ -382,31 +378,23 @@ func checkDuplicateFlags(current *CmdClause, flagGroups []*flagGroup) error {
 
 func (a *Application) execute(context *ParseContext, selected []string) (string, error) {
 	var err error
-	fmt.Printf("ex-selected: %s\n",selected)
 
 	if err = a.validateRequired(context); err != nil {
-		fmt.Println("1")
 		return "", err
 	}
 
 	if err = a.applyValidators(context); err != nil {
-		fmt.Println("2")
 		return "", err
 	}
-	fmt.Println("1111")
+
 	if err = a.applyActions(context); err != nil {
-		fmt.Println("3")
 		return "", err
 	}
 
 	command := strings.Join(selected, " ")
 	if command == "" && a.cmdGroup.have() {
-
-			fmt.Println("4")
 		return "", ErrCommandNotSpecified
 	}
-
-	fmt.Println("5")
 	return command, err
 }
 
@@ -563,12 +551,9 @@ func (a *Application) applyActions(context *ParseContext) error {
 	if err := a.actionMixin.applyActions(context); err != nil {
 		return err
 	}
-
 	// Dispatch to actions.
 	for _, element := range context.Elements {
-			fmt.Printf("element: %s\n",element)
 		if applier, ok := element.Clause.(actionApplier); ok {
-			fmt.Println("getting heter")
 			if err := applier.applyActions(context); err != nil {
 				return err
 			}
