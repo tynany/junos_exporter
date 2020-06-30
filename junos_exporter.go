@@ -25,6 +25,7 @@ var (
 	collectorConfig   *config.Configuration
 
 	interfaceDescriptionKeys = map[string][]string{}
+	interfaceMetricKeys = map[string][]string{}
 )
 
 func initCollectors() {
@@ -121,6 +122,9 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	ne.SetIfaceDescrKeys(interfaceDescriptionKeys[configParam])
 	registry.Register(ne)
 
+	ne.SetIfaceMetricKeys(interfaceMetricKeys[configParam])
+	registry.Register(ne)
+
 	gatherers := prometheus.Gatherers{
 		prometheus.DefaultGatherer,
 		registry,
@@ -187,6 +191,26 @@ func getInterfaceDescriptionKeys() {
 	}
 }
 
+func getInterfaceMetricKeys() {
+	var globalIfaceMetrics []string
+	if len(interfaceMetricKeys) == 0 {
+		if len(collectorConfig.Global.InterfaceMetricKeys) > 0 {
+			for _, descrKey := range collectorConfig.Global.InterfaceMetricKeys {
+				globalIfaceMetrics = append(globalIfaceMetrics, descrKey)
+			}
+		}
+	}
+	for name, configData := range collectorConfig.Config {
+		if len(configData.InterfaceMetricKeys) > 0 {
+			for _, metricKey := range configData.InterfaceMetricKeys {
+				interfaceMetricKeys[name] = append(interfaceMetricKeys[name], metricKey)
+			}
+		} else {
+			interfaceMetricKeys[name] = globalIfaceMetrics
+		}
+	}
+}
+
 func main() {
 	prometheus.MustRegister(version.NewCollector("junos_exporter"))
 
@@ -210,6 +234,7 @@ func main() {
 	}
 
 	getInterfaceDescriptionKeys()
+	getInterfaceMetricKeys()
 
 	http.HandleFunc(*telemetryPath, handler)
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
