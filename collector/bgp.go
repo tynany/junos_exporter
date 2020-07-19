@@ -131,9 +131,19 @@ func processBGPNeighborNetconfReply(reply *netconf.RPCReply, ch chan<- prometheu
 		return fmt.Errorf("could not unmarshal netconf reply xml: %s", err)
 	}
 	for _, peerData := range netconfReply.BgpInformation.BgpPeer {
-		re := regexp.MustCompile(`\+.*`)
-		peerLabels := []string{re.ReplaceAllString(strings.TrimSpace(peerData.PeerAddress), "")}
-		newGauge(ch, bgpDesc["PeerRIBAdvertisedPrefixCount"], peerData.BgpRib.AdvertisedPrefixCount, peerLabels...)
+		peerAddress := ""
+		if peerData.PeerAddress != "" {
+			// Junos 17 & 18 uses <peer-address>
+			peerAddress = peerData.PeerAddress
+		} else if peerData.BGPPeerHeader.PeerAddress != "" {
+			// Junos 19 uses <bgp-peer-header><peer-address>
+			peerAddress = peerData.BGPPeerHeader.PeerAddress
+		}
+		if peerAddress != "" {
+			re := regexp.MustCompile(`\+.*`)
+			peerLabels := []string{re.ReplaceAllString(strings.TrimSpace(peerAddress), "")}
+			newGauge(ch, bgpDesc["PeerRIBAdvertisedPrefixCount"], peerData.BgpRib.AdvertisedPrefixCount, peerLabels...)
+		}
 	}
 	return nil
 }
@@ -150,15 +160,13 @@ func processBGPNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric
 		if strings.ToLower(peerData.PeerState.Text) == "established" {
 			ch <- prometheus.MustNewConstMetric(bgpDesc["PeerPeerState"], prometheus.GaugeValue, 1.0, peerLabels...)
 			if peerData.Description.Text != "" {
-				var peerType bgpPeerType
+				var peerType map[string]string
 				if err := json.Unmarshal([]byte(peerData.Description.Text), &peerType); err != nil {
 					goto NoPeerType
 				}
-				if peerType.Type != "" {
-					if _, exists := peerTypes[strings.TrimSpace(peerType.Type)]; exists {
-						peerTypes[strings.TrimSpace(peerType.Type)]++
-					} else {
-						peerTypes[strings.TrimSpace(peerType.Type)] = 1
+				for _, descKey := range bgpTypeKeys {
+					if peerType[descKey] != "" {
+						peerTypes[strings.TrimSpace(peerType[descKey])]++
 					}
 				}
 			}
@@ -221,8 +229,9 @@ type bgpNeighborInformation struct {
 }
 
 type bgpNeighborPeer struct {
-	PeerAddress string         `xml:"peer-address"`
-	BgpRib      bgpNeighborRIB `xml:"bgp-rib"`
+	PeerAddress   string         `xml:"peer-address"`
+	BGPPeerHeader bgpPeerHeader  `xml:"bgp-peer-header"`
+	BgpRib        bgpNeighborRIB `xml:"bgp-rib"`
 }
 
 type bgpNeighborRIB struct {
@@ -290,6 +299,12 @@ type bgpPeerRIB struct {
 	ReceivedPrefixCount   bgpText `xml:"received-prefix-count"`
 	AcceptedPrefixCount   bgpText `xml:"accepted-prefix-count"`
 	SuppressedPrefixCount bgpText `xml:"suppressed-prefix-count"`
+}
+type bgpPeerHeader struct {
+	PeerAddress  string `xml:"peer-address"`
+	PeerAs       string `xml:"peer-as"`
+	LocalAddress string `xml:"local-address"`
+	LocalAs      string `xml:"local-as"`
 }
 
 type bgpPeerType struct {

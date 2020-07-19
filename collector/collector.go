@@ -30,7 +30,8 @@ var (
 	sshClientConfig *ssh.ClientConfig
 	sshTarget       string
 	ifaceDescrKeys  []string
-	ifaceMetricKeys  []string
+	ifaceMetricKeys []string
+	bgpTypeKeys     []string
 )
 
 // CollectErrors is used to collect collector errors.
@@ -97,6 +98,11 @@ func (*Exporters) SetIfaceDescrKeys(keys []string) {
 // SetIfaceMetricKeys sets the optional keys in an interface description to include in generated per-key metrics
 func (*Exporters) SetIfaceMetricKeys(keys []string) {
 	ifaceMetricKeys = keys
+}
+
+// SetBGPTypeKeys sets the optional keys in the BGP description to use for the junos_bgp_peer_types_up metric
+func (*Exporters) SetBGPTypeKeys(keys []string) {
+	bgpTypeKeys = keys
 }
 
 // Describe implemented as per the prometheus.Collector interface.

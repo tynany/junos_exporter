@@ -32,30 +32,34 @@ The above Docker commands assumes a configuration file that specifies the SSK ke
 Junos Exporter requires a configuration file in the below format:
 ```
 configs:
-  default:                  # Name of the configuration
-    timeout:                # SSH Timeout in seconds. Optional.
-    username:               # SSH Username. Required.
-    password:               # SSH Password. Optional.    
-    ssh_key:                # SSH Key. Optional.        
-    allowed_targets:        # List of targets that can be collected. Optional.
+  default:                       # Name of the configuration
+    timeout:                     # SSH Timeout in seconds. Optional.
+    username:                    # SSH Username. Required.
+    password:                    # SSH Password. Optional.    
+    ssh_key:                     # SSH Key. Optional.        
+    allowed_targets:             # List of targets that can be collected. Optional.
       -          
-    enabled_collectors:     # Which collectors to enable. Required.
+    enabled_collectors:          # Which collectors to enable. Required.
       - bgp
       - interface
       - environment
       - power
-    interface_description_keys: # List of JSON keys in the interface description to include as labels in the 'interface_description' metric. Optional.
+    interface_description_keys:   # List of JSON keys in the interface description to include as labels in the 'interface_description' metric. Optional.
       - 
-    interface_metric_keys: # List of JSON keys in the interface description to create static metrics from. Optional.
+    interface_metric_keys:        # List of JSON keys in the interface description to create static metrics from. Optional.
+      -
+    bgp_peer_type_keys:           # List of keys from the JSON formatted BGP peer description of which the values will be used with the frr_bgp_peer_types_up metric. Optional.
       -
 global:
-  timeout:                  # SSH Timeout in seconds, globally configured. Optional.
-  allowed_targets:          # List of targets that can be collected, globally configured. Optional.
+  timeout:                       # SSH Timeout in seconds, globally configured. Optional.
+  allowed_targets:               # List of targets that can be collected, globally configured. Optional.
     -
-  interface_description_keys: # List of JSON keys in the interface description to include as labels in the 'interface_description' metric, globally configured. Optional.
+  interface_description_keys:    # List of JSON keys in the interface description to include as labels in the 'interface_description' metric, globally configured. Optional.
       - 
-    interface_metric_keys: # List of JSON keys in the interface description to create static metrics from, globally configured. Optional.
-      - 
+  interface_metric_keys:         # List of JSON keys in the interface description to create static metrics from, globally configured. Optional.
+    - 
+  bgp_peer_type_keys:            # List of keys from the JSON formatted BGP peer description of which the values will be used with the frr_bgp_peer_types_up metric. Optional.
+    -
 ```
 ### Example
 ```
@@ -99,7 +103,7 @@ The below metrics are currently implemented.
 - Route Engine, from `show chassis routing-engine`.
 
 ### BGP: junos_bgp_peer_types_up
-Junos Exporter exposes a special metric, `junos_bgp_peer_types_up`, that can be used in scenarios where you want to create Prometheus queries that report on the number of types of BGP peers that are currently established, such as for Alert Manager. To implement this metric, a JSON formatted description with a 'type' element must be configured on your BGP group. Junos Exporter will then aggregate all BGP peers that are currently established and configured with that type.
+Junos Exporter exposes a special metric, `junos_bgp_peer_types_up`, that can be used in scenarios where you want to create Prometheus queries that report on the number of types of BGP peers that are currently established, such as for Alertmanager. To implement this metric, a JSON formatted description must be configured on your BGP group. Junos Exporter will then use the value from the keys specific under the `bgp_peer_type_keys` configuration, and aggregate all BGP peers that are currently established and configured with that type.
 
 For example, if you want to know how many BGP peers are currently established that provide internet, you'd set the description of all BGP groups that provide internet to `{"type":"internet"}` and query Prometheus with `junos_bgp_peer_types_up{type="internet"})`. Going further, if you want to create an alert when the number of established BGP peers that provide internet is 1 or less, you'd use `sum(junos_bgp_peer_types_up{type="internet"}) <= 1`.  
 

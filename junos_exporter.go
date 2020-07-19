@@ -25,7 +25,8 @@ var (
 	collectorConfig   *config.Configuration
 
 	interfaceDescriptionKeys = map[string][]string{}
-	interfaceMetricKeys = map[string][]string{}
+	interfaceMetricKeys      = map[string][]string{}
+	bgpTypeKeys              = map[string][]string{}
 )
 
 func initCollectors() {
@@ -120,9 +121,8 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ne.SetIfaceDescrKeys(interfaceDescriptionKeys[configParam])
-	registry.Register(ne)
-
 	ne.SetIfaceMetricKeys(interfaceMetricKeys[configParam])
+	ne.SetBGPTypeKeys(bgpTypeKeys[configParam])
 	registry.Register(ne)
 
 	gatherers := prometheus.Gatherers{
@@ -211,6 +211,26 @@ func getInterfaceMetricKeys() {
 	}
 }
 
+func getBGPTypeKeys() {
+	var globalBGPTypeKeys []string
+	if len(bgpTypeKeys) == 0 {
+		if len(collectorConfig.Global.BGPTypeKeys) > 0 {
+			for _, descrKey := range collectorConfig.Global.BGPTypeKeys {
+				globalBGPTypeKeys = append(globalBGPTypeKeys, descrKey)
+			}
+		}
+	}
+	for name, configData := range collectorConfig.Config {
+		if len(configData.BGPTypeKeys) > 0 {
+			for _, metricKey := range configData.BGPTypeKeys {
+				bgpTypeKeys[name] = append(bgpTypeKeys[name], metricKey)
+			}
+		} else {
+			bgpTypeKeys[name] = globalBGPTypeKeys
+		}
+	}
+}
+
 func main() {
 	prometheus.MustRegister(version.NewCollector("junos_exporter"))
 
@@ -235,6 +255,7 @@ func main() {
 
 	getInterfaceDescriptionKeys()
 	getInterfaceMetricKeys()
+	getBGPTypeKeys()
 
 	http.HandleFunc(*telemetryPath, handler)
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
