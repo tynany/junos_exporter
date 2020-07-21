@@ -157,20 +157,25 @@ func processBGPNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric
 	peerTypes := make(map[string]float64)
 	for _, peerData := range netconfReply.BGPInformation.BGPPeer {
 		peerLabels := []string{strings.TrimSpace(peerData.PeerAddress.Text)}
-		if strings.ToLower(peerData.PeerState.Text) == "established" {
-			ch <- prometheus.MustNewConstMetric(bgpDesc["PeerPeerState"], prometheus.GaugeValue, 1.0, peerLabels...)
-			if peerData.Description.Text != "" {
-				var peerType map[string]string
-				if err := json.Unmarshal([]byte(peerData.Description.Text), &peerType); err != nil {
-					goto NoPeerType
-				}
+		var peerType map[string]string
+		if len(bgpTypeKeys) > 0 && peerData.Description.Text != "" {
+			if err := json.Unmarshal([]byte(peerData.Description.Text), &peerType); err == nil {
 				for _, descKey := range bgpTypeKeys {
 					if peerType[descKey] != "" {
-						peerTypes[strings.TrimSpace(peerType[descKey])]++
+						if _, exist := peerTypes[strings.TrimSpace(peerType[descKey])]; !exist {
+							peerTypes[strings.TrimSpace(peerType[descKey])] = 0
+						}
 					}
 				}
 			}
-		NoPeerType:
+		}
+		if strings.ToLower(peerData.PeerState.Text) == "established" {
+			ch <- prometheus.MustNewConstMetric(bgpDesc["PeerPeerState"], prometheus.GaugeValue, 1.0, peerLabels...)
+			for _, descKey := range bgpTypeKeys {
+				if peerType[descKey] != "" {
+					peerTypes[strings.TrimSpace(peerType[descKey])]++
+				}
+			}
 		} else {
 			ch <- prometheus.MustNewConstMetric(bgpDesc["PeerPeerState"], prometheus.GaugeValue, 0.0, peerLabels...)
 		}
