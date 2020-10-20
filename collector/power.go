@@ -37,63 +37,45 @@ var (
 		"DCUsage":               colPromDesc(powerSubsystem, "module_dc_usage_watts", "Module DC Usage in Watts.", powerLabel),
 	}
 
-	powerErrors      = []error{}
 	totalPowerErrors = 0.0
 )
 
-// PowerCollector collects power metrics, implemented as per the Collector power.
+// PowerCollector collects power metrics, implemented as per the Collector interface.
 type PowerCollector struct{}
 
-// NewPowerCollector returns a PowerCollector type.
+// NewPowerCollector returns a new PowerCollector .
 func NewPowerCollector() *PowerCollector {
 	return &PowerCollector{}
 }
 
-// Name of the collector. Used to parse the configuration file.
+// Name of the collector.
 func (*PowerCollector) Name() string {
 	return powerSubsystem
 }
 
-// CollectErrors returns what errors have been gathered.
-func (*PowerCollector) CollectErrors() []error {
-	errors := powerErrors
-	powerErrors = []error{}
-	return errors
-}
-
-// CollectTotalErrors collects total errors.
-func (*PowerCollector) CollectTotalErrors() float64 {
-	return totalPowerErrors
-}
-
-// Describe all metrics implemented as per the prometheus.Collector interface.
-func (*PowerCollector) Describe(ch chan<- *prometheus.Desc) {
-	for _, desc := range powerDesc {
-		ch <- desc
-	}
-}
-
-// Collect metrics as per the prometheus.Collector interface.
-func (c *PowerCollector) Collect(ch chan<- prometheus.Metric) {
-	s, err := netconf.DialSSH(sshTarget, sshClientConfig)
+// Get metrics and send to the Prometheus.Metric channel.
+func (c *PowerCollector) Get(ch chan<- prometheus.Metric, conf Config) ([]error, float64) {
+	errors := []error{}
+	s, err := netconf.DialSSH(conf.SSHTarget, conf.SSHClientConfig)
 	if err != nil {
 		totalPowerErrors++
-		powerErrors = append(powerErrors, fmt.Errorf("could not connect to %q: %s", sshTarget, err))
-		return
+		errors = append(errors, fmt.Errorf("could not connect to %q: %s", conf.SSHTarget, err))
+		return errors, totalPowerErrors
 	}
 	defer s.Close()
 
 	reply, err := s.Exec(netconf.RawMethod(`<get-power-usage-information-detail></get-power-usage-information-detail>`))
 	if err != nil {
 		totalPowerErrors++
-		powerErrors = append(powerErrors, fmt.Errorf("could not execute netconf RPC call: %s", err))
-		return
+		errors = append(errors, fmt.Errorf("could not execute netconf RPC call: %s", err))
+		return errors, totalPowerErrors
 	}
 
 	if err := processPowerNetconfReply(reply, ch); err != nil {
 		totalPowerErrors++
-		powerErrors = append(powerErrors, err)
+		errors = append(errors, err)
 	}
+	return errors, totalPowerErrors
 }
 
 func processPowerNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric) error {

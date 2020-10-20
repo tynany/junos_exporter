@@ -1,7 +1,9 @@
-FROM golang:1.13.12
+FROM golang:1.13
 WORKDIR /go/src/github.com/tynany/junos_exporter
 COPY . /go/src/github.com/tynany/junos_exporter
-RUN CGO_ENABLED=0 GOOS=linux go build .
+RUN make setup_promu
+RUN ./promu build
+RUN ls -lah
 
 FROM alpine:3.12.0
 WORKDIR /app

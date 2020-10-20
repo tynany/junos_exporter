@@ -12,6 +12,7 @@ import (
 	"github.com/prometheus/common/version"
 	"github.com/tynany/junos_exporter/collector"
 	"github.com/tynany/junos_exporter/config"
+	"golang.org/x/crypto/ssh"
 	kingpin "gopkg.in/alecthomas/kingpin.v2"
 )
 
@@ -20,9 +21,14 @@ var (
 	telemetryPath = kingpin.Flag("web.telemetry-path", "Path under which to expose metrics.").Default("/metrics").String()
 	configPath    = kingpin.Flag("config.path", "Path of the YAML configuration file.").Required().String()
 
-	collectors        = []*collector.Collector{}
-	exporterSSHConfig = map[string]collector.SSHConfig{}
-	collectorConfig   *config.Configuration
+	// Slice of all configs.
+	collectors = []collector.Collector{}
+
+	// Map of client SSH configuration (value) per config as specified in the config file (key).
+	exporterSSHConfig = map[string]*ssh.ClientConfig{}
+
+	// Globally accessible configuration loaded from the config file.
+	collectorConfig *config.Configuration
 
 	interfaceDescriptionKeys = map[string][]string{}
 	interfaceMetricKeys      = map[string][]string{}
@@ -30,36 +36,11 @@ var (
 )
 
 func initCollectors() {
-	iface := collector.NewInterfaceCollector()
-	collectors = append(collectors, &collector.Collector{
-		PromCollector: iface,
-		Errors:        iface,
-		Name:          iface.Name(),
-	})
-	bgp := collector.NewBGPCollector()
-	collectors = append(collectors, &collector.Collector{
-		PromCollector: bgp,
-		Errors:        bgp,
-		Name:          bgp.Name(),
-	})
-	env := collector.NewEnvCollector()
-	collectors = append(collectors, &collector.Collector{
-		PromCollector: env,
-		Errors:        env,
-		Name:          env.Name(),
-	})
-	power := collector.NewPowerCollector()
-	collectors = append(collectors, &collector.Collector{
-		PromCollector: power,
-		Errors:        power,
-		Name:          power.Name(),
-	})
-	re := collector.NewRECollector()
-	collectors = append(collectors, &collector.Collector{
-		PromCollector: re,
-		Errors:        re,
-		Name:          re.Name(),
-	})
+	collectors = append(collectors, collector.NewInterfaceCollector())
+	collectors = append(collectors, collector.NewBGPCollector())
+	collectors = append(collectors, collector.NewEnvCollector())
+	collectors = append(collectors, collector.NewPowerCollector())
+	collectors = append(collectors, collector.NewRECollector())
 }
 
 func validateRequest(configParam string, targetParam string) error {
@@ -105,24 +86,29 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	registry := prometheus.NewRegistry()
-	enabledCollectors := []*collector.Collector{}
+	enabledCollectors := []collector.Collector{}
 	for _, collector := range collectors {
 		for _, col := range collectorConfig.Config[configParam].Collectors {
-			if collector.Name == col {
+			if collector.Name() == col {
 				enabledCollectors = append(enabledCollectors, collector)
 			}
 		}
 	}
 
-	ne := collector.NewExporter(enabledCollectors)
+	config := collector.Config{
+		SSHClientConfig: exporterSSHConfig[configParam],
+		SSHTarget:       targetParam,
+		IfaceDescrKeys:  interfaceDescriptionKeys[configParam],
+		IfaceMetricKeys: interfaceMetricKeys[configParam],
+		BGPTypeKeys:     bgpTypeKeys[configParam],
+	}
 
-	if err := ne.SetConnectionDetails(exporterSSHConfig[configParam], targetParam); err != nil {
-		log.Errorf("could not set connection details: %s", err)
+	ne, err := collector.NewExporter(enabledCollectors, config)
+	if err != nil {
+		log.Errorf("could not start exporter: %s", err)
 		return
 	}
-	ne.SetIfaceDescrKeys(interfaceDescriptionKeys[configParam])
-	ne.SetIfaceMetricKeys(interfaceMetricKeys[configParam])
-	ne.SetBGPTypeKeys(bgpTypeKeys[configParam])
+
 	registry.Register(ne)
 
 	gatherers := prometheus.Gatherers{
@@ -145,28 +131,32 @@ func parseCLI() {
 
 func generateSSHConfig() error {
 	for name, configData := range collectorConfig.Config {
-		sshConfig := collector.SSHConfig{
-			Username: configData.Username,
-		}
-		if configData.Password != "" {
-			sshConfig.Password = configData.Password
+		sshClientConfig := &ssh.ClientConfig{
+			User: configData.Username,
 		}
 		if configData.SSHKey != "" {
 			buf, err := ioutil.ReadFile(configData.SSHKey)
 			if err != nil {
 				return fmt.Errorf("could not open ssh key %q: %s", configData.SSHKey, err)
 			}
-			sshConfig.SSHKey = buf
+			parsedKey, err := ssh.ParsePrivateKey(buf)
+			if err != nil {
+				return err
+			}
+			sshClientConfig.Auth = []ssh.AuthMethod{ssh.PublicKeys(parsedKey)}
+		} else {
+			sshClientConfig.Auth = []ssh.AuthMethod{ssh.Password(configData.Password)}
 		}
 		if configData.Timeout != 0 {
-			sshConfig.Timeout = time.Second * time.Duration(configData.Timeout)
+			sshClientConfig.Timeout = time.Second * time.Duration(configData.Timeout)
 
 		} else if collectorConfig.Global.Timeout != 0 {
-			sshConfig.Timeout = time.Second * time.Duration(collectorConfig.Global.Timeout)
+			sshClientConfig.Timeout = time.Second * time.Duration(collectorConfig.Global.Timeout)
 		} else {
-			sshConfig.Timeout = time.Second * 20
+			sshClientConfig.Timeout = time.Second * 20
 		}
-		exporterSSHConfig[name] = sshConfig
+		sshClientConfig.HostKeyCallback = ssh.InsecureIgnoreHostKey()
+		exporterSSHConfig[name] = sshClientConfig
 	}
 	return nil
 }
@@ -239,9 +229,10 @@ func main() {
 
 	log.Infof("Starting junos_exporter %s on %s", version.Info(), *listenAddress)
 
+	// Get a list of collector names to validate collectors specified in the config file exist.
 	var collectorNames []string
 	for _, collector := range collectors {
-		collectorNames = append(collectorNames, collector.Name)
+		collectorNames = append(collectorNames, collector.Name())
 	}
 	var err error
 	collectorConfig, err = config.LoadConfigFile(*configPath, collectorNames)

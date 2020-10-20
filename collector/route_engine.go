@@ -34,63 +34,45 @@ var (
 		"masterPrio":    colPromDesc(reSubsystem, "mastership_priority", "Mastership priority (1 = Master, 0 = Backup).", reLabels),
 	}
 
-	reErrors      = []error{}
 	totalREErrors = 0.0
 )
 
-// RECollector collects route enginer metrics.
+// RECollector collects route engine metrics, implemented as per the Collector interface.
 type RECollector struct{}
 
-// NewRECollector returns a RECollector type.
+// NewRECollector returns a new RECollector.
 func NewRECollector() *RECollector {
 	return &RECollector{}
 }
 
-// Name of the collector. Used to parse the configuration file.
+// Name of the collector.
 func (*RECollector) Name() string {
 	return reSubsystem
 }
 
-// CollectErrors returns what errors have been gathered.
-func (*RECollector) CollectErrors() []error {
-	errors := reErrors
-	reErrors = []error{}
-	return errors
-}
-
-// CollectTotalErrors collects total errors.
-func (*RECollector) CollectTotalErrors() float64 {
-	return totalREErrors
-}
-
-// Describe all metrics implemented as per the prometheus.Collector interface.
-func (*RECollector) Describe(ch chan<- *prometheus.Desc) {
-	for _, desc := range reDesc {
-		ch <- desc
-	}
-}
-
-// Collect metrics as per the prometheus.Collector interface.
-func (c *RECollector) Collect(ch chan<- prometheus.Metric) {
-	s, err := netconf.DialSSH(sshTarget, sshClientConfig)
+// Get metrics and send to the Prometheus.Metric channel.
+func (c *RECollector) Get(ch chan<- prometheus.Metric, conf Config) ([]error, float64) {
+	errors := []error{}
+	s, err := netconf.DialSSH(conf.SSHTarget, conf.SSHClientConfig)
 	if err != nil {
 		totalREErrors++
-		reErrors = append(reErrors, fmt.Errorf("could not connect to %q: %s", sshTarget, err))
-		return
+		errors = append(errors, fmt.Errorf("could not connect to %q: %s", conf.SSHTarget, err))
+		return errors, totalREErrors
 	}
 	defer s.Close()
 
 	reply, err := s.Exec(netconf.RawMethod(`<get-route-engine-information/>`))
 	if err != nil {
 		totalREErrors++
-		reErrors = append(reErrors, fmt.Errorf("could not execute netconf RPC call: %s", err))
-		return
+		errors = append(errors, fmt.Errorf("could not execute netconf RPC call: %s", err))
+		return errors, totalREErrors
 	}
 
 	if err := processRENetconfReply(reply, ch); err != nil {
 		totalREErrors++
-		reErrors = append(reErrors, err)
+		errors = append(errors, err)
 	}
+	return errors, totalREErrors
 }
 
 func processRENetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric) error {

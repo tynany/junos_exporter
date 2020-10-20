@@ -18,63 +18,45 @@ var (
 		"Temp":   colPromDesc(envSubsystem, "module_temperature_celsius", "Module Temperature in Celsius", envLabels),
 	}
 
-	envErrors      = []error{}
 	totalEnvErrors = 0.0
 )
 
-// EnvCollector collects environment metrics, implemented as per the Collector env.
+// EnvCollector collects environment metrics, implemented as per the Collector interface.
 type EnvCollector struct{}
 
-// NewEnvCollector returns a EnvCollector type.
+// NewEnvCollector returns a new EnvCollector.
 func NewEnvCollector() *EnvCollector {
 	return &EnvCollector{}
 }
 
-// Name of the collector. Used to parse the configuration file.
+// Name of the collector.
 func (*EnvCollector) Name() string {
 	return envSubsystem
 }
 
-// CollectErrors returns what errors have been gathered.
-func (*EnvCollector) CollectErrors() []error {
-	errors := envErrors
-	envErrors = []error{}
-	return errors
-}
-
-// CollectTotalErrors collects total errors.
-func (*EnvCollector) CollectTotalErrors() float64 {
-	return totalEnvErrors
-}
-
-// Describe all metrics implemented as per the prometheus.Collector interface.
-func (*EnvCollector) Describe(ch chan<- *prometheus.Desc) {
-	for _, desc := range envDesc {
-		ch <- desc
-	}
-}
-
-// Collect metrics as per the prometheus.Collector interface.
-func (c *EnvCollector) Collect(ch chan<- prometheus.Metric) {
-	s, err := netconf.DialSSH(sshTarget, sshClientConfig)
+// Get metrics and send to the Prometheus.Metric channel.
+func (c *EnvCollector) Get(ch chan<- prometheus.Metric, conf Config) ([]error, float64) {
+	errors := []error{}
+	s, err := netconf.DialSSH(conf.SSHTarget, conf.SSHClientConfig)
 	if err != nil {
 		totalEnvErrors++
-		envErrors = append(envErrors, fmt.Errorf("could not connect to %q: %s", sshTarget, err))
-		return
+		errors = append(errors, fmt.Errorf("could not connect to %q: %s", conf.SSHTarget, err))
+		return errors, totalEnvErrors
 	}
 	defer s.Close()
 
 	reply, err := s.Exec(netconf.RawMethod(`<get-environment-information/>`))
 	if err != nil {
 		totalEnvErrors++
-		envErrors = append(envErrors, fmt.Errorf("could not execute netconf RPC call: %s", err))
-		return
+		errors = append(errors, fmt.Errorf("could not execute netconf RPC call: %s", err))
+		return errors, totalEnvErrors
 	}
 
 	if err := processEnvNetconfReply(reply, ch); err != nil {
 		totalEnvErrors++
-		envErrors = append(envErrors, err)
+		errors = append(errors, err)
 	}
+	return errors, totalEnvErrors
 }
 
 func processEnvNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric) error {
