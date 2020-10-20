@@ -48,7 +48,7 @@ configs:
       - 
     interface_metric_keys:        # List of JSON keys in the interface description to create static metrics from. Optional.
       -
-    bgp_peer_type_keys:           # List of keys from the JSON formatted BGP peer description of which the values will be used with the frr_bgp_peer_types_up metric. Optional.
+    bgp_peer_type_keys:           # List of keys from the JSON formatted BGP peer description of which the values will be used with the junos_bgp_peer_types_up metric. Optional.
       -
 global:
   timeout:                       # SSH Timeout in seconds, globally configured. Optional.
@@ -58,7 +58,7 @@ global:
       - 
   interface_metric_keys:         # List of JSON keys in the interface description to create static metrics from, globally configured. Optional.
     - 
-  bgp_peer_type_keys:            # List of keys from the JSON formatted BGP peer description of which the values will be used with the frr_bgp_peer_types_up metric. Optional.
+  bgp_peer_type_keys:            # List of keys from the JSON formatted BGP peer description of which the values will be used with the junos_bgp_peer_types_up metric. Optional.
     -
 ```
 ### Example

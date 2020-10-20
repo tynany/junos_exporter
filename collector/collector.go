@@ -7,8 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/log"
+
+	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -17,7 +18,6 @@ const namespace = "junos"
 
 var (
 	junosTotalScrapeCount = 0.0
-	junosTotalErrorCount  = 0
 	junosLabels           = []string{"collector"}
 	junosDesc             = map[string]*prometheus.Desc{
 		"ScrapesTotal":   promDesc("scrapes_total", "Total number of times Junos has been scraped.", nil),
@@ -26,123 +26,77 @@ var (
 		"CollectorUp":    promDesc("collector_up", "Whether the collector's last scrape was successful (1 = successful, 0 = unsuccessful).", junosLabels),
 		"Up":             promDesc("up", "Whether the Junos collector is currently up.", nil),
 	}
-
-	sshClientConfig *ssh.ClientConfig
-	sshTarget       string
-	ifaceDescrKeys  []string
-	ifaceMetricKeys []string
-	bgpTypeKeys     []string
 )
 
-// CollectErrors is used to collect collector errors.
-type CollectErrors interface {
-	// Returns any errors that were encounted during Collect.
-	CollectErrors() []error
-
-	// Returns the total number of errors encounter during app run duration.
-	CollectTotalErrors() float64
+// Collector is the interface a collector has to implement.
+type Collector interface {
+	// Returns the name of the collector.
+	Name() string
+	// Gets metrics and sends to the Prometheus.Metric channel.
+	Get(ch chan<- prometheus.Metric, config Config) ([]error, float64)
 }
 
-// SSHConfig contains the credentials required to create a *ssh.ClientConfig that is used to connect to a device.
-type SSHConfig struct {
-	Username string
-	Timeout  time.Duration
-	Password string
-	SSHKey   []byte
+// Config required by the collectors.
+type Config struct {
+	SSHClientConfig *ssh.ClientConfig
+	SSHTarget       string
+	IfaceDescrKeys  []string
+	IfaceMetricKeys []string
+	BGPTypeKeys     []string
 }
 
-// Exporters contains a slice of Collectors.
-type Exporters struct {
-	Collectors []*Collector
+// Exporter collects all exporter metrics, implemented as per the prometheus.Collector interface.
+type Exporter struct {
+	Collectors []Collector
+	config     Config
 }
 
-// Collector contains everything needed to collect from a collector.
-type Collector struct {
-	Name          string
-	PromCollector prometheus.Collector
-	Errors        CollectErrors
-}
-
-// NewExporter returns an Exporters type containing a slice of Collectors.
-func NewExporter(collectors []*Collector) *Exporters {
-	return &Exporters{
+// NewExporter returns a new Exporter.
+func NewExporter(collectors []Collector, config Config) (*Exporter, error) {
+	return &Exporter{
 		Collectors: collectors,
-	}
-}
-
-// SetConnectionDetails sets the sshClientConfig and sshTarget variables required to make a connection.
-func (*Exporters) SetConnectionDetails(config SSHConfig, target string) error {
-	sshTarget = target
-	sshClientConfig = &ssh.ClientConfig{
-		User: config.Username,
-	}
-	if len(config.SSHKey) > 0 {
-		parsedKey, err := ssh.ParsePrivateKey(config.SSHKey)
-		if err != nil {
-			return err
-		}
-		sshClientConfig.Auth = []ssh.AuthMethod{ssh.PublicKeys(parsedKey)}
-	} else {
-		sshClientConfig.Auth = []ssh.AuthMethod{ssh.Password(config.Password)}
-	}
-	sshClientConfig.Timeout = config.Timeout
-	sshClientConfig.HostKeyCallback = ssh.InsecureIgnoreHostKey()
-	return nil
-}
-
-// SetIfaceDescrKeys sets the optional keys in an interface description to include in the generated interface_description metric
-func (*Exporters) SetIfaceDescrKeys(keys []string) {
-	ifaceDescrKeys = keys
-}
-
-// SetIfaceMetricKeys sets the optional keys in an interface description to include in generated per-key metrics
-func (*Exporters) SetIfaceMetricKeys(keys []string) {
-	ifaceMetricKeys = keys
-}
-
-// SetBGPTypeKeys sets the optional keys in the BGP description to use for the junos_bgp_peer_types_up metric
-func (*Exporters) SetBGPTypeKeys(keys []string) {
-	bgpTypeKeys = keys
-}
-
-// Describe implemented as per the prometheus.Collector interface.
-func (e *Exporters) Describe(ch chan<- *prometheus.Desc) {
-	for _, desc := range bgpDesc {
-		ch <- desc
-	}
-	for _, collector := range e.Collectors {
-		collector.PromCollector.Describe(ch)
-	}
+		config:     config,
+	}, nil
 }
 
 // Collect implemented as per the prometheus.Collector interface.
-func (e *Exporters) Collect(ch chan<- prometheus.Metric) {
+func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	junosTotalScrapeCount++
 	ch <- prometheus.MustNewConstMetric(junosDesc["ScrapesTotal"], prometheus.CounterValue, junosTotalScrapeCount)
 
 	wg := &sync.WaitGroup{}
 	for _, collector := range e.Collectors {
 		wg.Add(1)
-		go runCollector(ch, collector, wg)
+		go e.runCollector(ch, collector, wg)
 	}
 	wg.Wait()
 }
 
-func runCollector(ch chan<- prometheus.Metric, collector *Collector, wg *sync.WaitGroup) {
+func (e *Exporter) runCollector(ch chan<- prometheus.Metric, collector Collector, wg *sync.WaitGroup) {
 	defer wg.Done()
+	collectorName := collector.Name()
+
 	startTime := time.Now()
-	collector.PromCollector.Collect(ch)
-	ch <- prometheus.MustNewConstMetric(junosDesc["ScrapeErrTotal"], prometheus.GaugeValue, collector.Errors.CollectTotalErrors(), collector.Name)
-	errors := collector.Errors.CollectErrors()
+	errors, totalErrors := collector.Get(ch, e.config)
+
+	ch <- prometheus.MustNewConstMetric(junosDesc["ScrapeDuration"], prometheus.GaugeValue, float64(time.Since(startTime).Seconds()), collectorName)
+	ch <- prometheus.MustNewConstMetric(junosDesc["ScrapeErrTotal"], prometheus.GaugeValue, totalErrors, collectorName)
+
 	if len(errors) > 0 {
-		ch <- prometheus.MustNewConstMetric(junosDesc["CollectorUp"], prometheus.GaugeValue, 0, collector.Name)
+		ch <- prometheus.MustNewConstMetric(junosDesc["CollectorUp"], prometheus.GaugeValue, 0, collector.Name())
 		for _, err := range errors {
-			log.Errorf("collector %q scrape failed: %s", collector.Name, err)
+			log.Errorf("collector %q scrape failed: %s", collectorName, err)
 		}
 	} else {
-		ch <- prometheus.MustNewConstMetric(junosDesc["CollectorUp"], prometheus.GaugeValue, 1, collector.Name)
+		ch <- prometheus.MustNewConstMetric(junosDesc["CollectorUp"], prometheus.GaugeValue, 1, collectorName)
 	}
-	ch <- prometheus.MustNewConstMetric(junosDesc["ScrapeDuration"], prometheus.GaugeValue, float64(time.Since(startTime).Seconds()), collector.Name)
+}
+
+// Describe implemented as per the prometheus.Collector interface.
+func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
+	for _, desc := range junosDesc {
+		ch <- desc
+	}
 }
 
 func promDesc(metricName string, metricDescription string, labels []string) *prometheus.Desc {

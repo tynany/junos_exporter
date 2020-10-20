@@ -52,76 +52,57 @@ var (
 		"RIBPendingPrefixCount":            colPromDesc(bgpSubsystem, "rib_pending_prefixes", "Number of Pending Prefixes in the RIB.", bgpRIBLabels),
 		"PeerTypesUp":                      colPromDesc(bgpSubsystem, "peer_types_up", "Total Number of Peer Types that are Up.", bgpPeerTypeLabels),
 	}
-
-	bgpErrors      = []error{}
 	totalBGPErrors = 0.0
 )
 
-// BGPCollector collects BGP metrics, implemented as per the Collector bgp.
+// BGPCollector collects BGP metrics, implemented as per the Collector interface.
 type BGPCollector struct{}
 
-// NewBGPCollector returns a BGPCollector type.
+// NewBGPCollector returns a new BGPCollector
 func NewBGPCollector() *BGPCollector {
 	return &BGPCollector{}
 }
 
-// Name of the collector. Used to parse the configuration file.
+// Name of the collector.
 func (*BGPCollector) Name() string {
 	return bgpSubsystem
 }
 
-// CollectErrors returns what errors have been gathered.
-func (*BGPCollector) CollectErrors() []error {
-	errors := bgpErrors
-	bgpErrors = []error{}
-	return errors
-}
-
-// CollectTotalErrors collects total errors.
-func (*BGPCollector) CollectTotalErrors() float64 {
-	return totalBGPErrors
-}
-
-// Describe all metrics
-func (*BGPCollector) Describe(ch chan<- *prometheus.Desc) {
-	for _, desc := range bgpDesc {
-		ch <- desc
-	}
-}
-
-// Collect metric from a passed netconf.Session.
-func (c *BGPCollector) Collect(ch chan<- prometheus.Metric) {
-	s, err := netconf.DialSSH(sshTarget, sshClientConfig)
+// Get metrics and send to the Prometheus.Metric channel.
+func (c *BGPCollector) Get(ch chan<- prometheus.Metric, conf Config) ([]error, float64) {
+	errors := []error{}
+	s, err := netconf.DialSSH(conf.SSHTarget, conf.SSHClientConfig)
 	if err != nil {
 		totalBGPErrors++
-		bgpErrors = append(bgpErrors, fmt.Errorf("could not connect to %q: %s", sshTarget, err))
-		return
+		errors = append(errors, fmt.Errorf("could not connect to %q: %s", conf.SSHTarget, err))
+		return errors, totalBGPErrors
 	}
 	defer s.Close()
 
 	reply, err := s.Exec(netconf.RawMethod(`<get-bgp-summary-information/>`))
 	if err != nil {
 		totalBGPErrors++
-		bgpErrors = append(bgpErrors, fmt.Errorf("could not execute netconf RPC call: %s", err))
-		return
+		errors = append(errors, fmt.Errorf("could not execute netconf RPC call: %s", err))
+		return errors, totalBGPErrors
 	}
 
 	replyNeighbor, err := s.Exec(netconf.RawMethod(`<get-bgp-neighbor-information/>`))
 	if err != nil {
 		totalBGPErrors++
-		bgpErrors = append(bgpErrors, fmt.Errorf("could not execute netconf RPC call: %s", err))
-		return
+		errors = append(errors, fmt.Errorf("could not execute netconf RPC call: %s", err))
+		return errors, totalBGPErrors
 	}
 
-	if err := processBGPNetconfReply(reply, ch); err != nil {
+	if err := processBGPNetconfReply(reply, ch, conf.BGPTypeKeys); err != nil {
 		totalBGPErrors++
-		bgpErrors = append(bgpErrors, err)
+		errors = append(errors, err)
 	}
 
 	if err := processBGPNeighborNetconfReply(replyNeighbor, ch); err != nil {
 		totalBGPErrors++
-		bgpErrors = append(bgpErrors, err)
+		errors = append(errors, err)
 	}
+	return errors, totalBGPErrors
 }
 
 func processBGPNeighborNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric) error {
@@ -148,7 +129,7 @@ func processBGPNeighborNetconfReply(reply *netconf.RPCReply, ch chan<- prometheu
 	return nil
 }
 
-func processBGPNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric) error {
+func processBGPNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric, bgpTypeKeys []string) error {
 	var netconfReply bgpRPCReply
 
 	if err := xml.Unmarshal([]byte(reply.RawReply), &netconfReply); err != nil {

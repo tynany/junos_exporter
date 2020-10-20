@@ -13,11 +13,10 @@ import (
 
 var (
 	ifaceSubsystem   = "interface"
-	ifaceErrors      = []error{}
 	totalIfaceErrors = 0.0
 )
 
-func getInterfaceDesc() map[string]*prometheus.Desc {
+func getInterfaceDesc(ifaceDescrKeys, ifaceMetricKeys []string) map[string]*prometheus.Desc {
 	var ifacePhysicalLabels = []string{"interface"}
 	var ifacePRECLClass = append(ifacePhysicalLabels, "class")
 
@@ -155,10 +154,10 @@ func getInterfaceDesc() map[string]*prometheus.Desc {
 		"SpeedBytes":                               colPromDesc(ifaceSubsystem, "speed_bytes", "Speed of the Interface in Bytes per Second", ifacePhysicalLabels),
 	}
 	if len(ifaceDescrKeys) > 0 {
-		ifaceDesc["InterfaceDescription"] = 		colPromDesc(ifaceSubsystem, "description", "Interface description keys", append([]string{"interface"}, ifaceDescrKeys...))
+		ifaceDesc["InterfaceDescription"] = colPromDesc(ifaceSubsystem, "description", "Interface description keys", append([]string{"interface"}, ifaceDescrKeys...))
 	}
 	for _, metricKey := range ifaceMetricKeys {
-		ifaceDesc[metricKey] = 		colPromDesc(ifaceSubsystem, strings.ToLower(metricKey), "User-defined Metric from Description Key", append([]string{"interface"}))
+		ifaceDesc[metricKey] = colPromDesc(ifaceSubsystem, strings.ToLower(metricKey), "User-defined Metric from Description Key", append([]string{"interface"}))
 	}
 	return ifaceDesc
 }
@@ -166,65 +165,49 @@ func getInterfaceDesc() map[string]*prometheus.Desc {
 // InterfaceCollector collects Iface metrics, implemented as per the Collector iface.
 type InterfaceCollector struct{}
 
-// NewInterfaceCollector returns a InterfaceCollector type.
+// NewInterfaceCollector returns a new InterfaceCollector.
 func NewInterfaceCollector() *InterfaceCollector {
 	return &InterfaceCollector{}
 }
 
-// Name of the collector. Used to parse the configuration file.
+// Name of the collector.
 func (*InterfaceCollector) Name() string {
 	return ifaceSubsystem
 }
 
-// CollectErrors returns what errors have been gathered.
-func (*InterfaceCollector) CollectErrors() []error {
-	errors := ifaceErrors
-	ifaceErrors = []error{}
-	return errors
-}
+// Get metrics and send to the Prometheus.Metric channel.
+func (c *InterfaceCollector) Get(ch chan<- prometheus.Metric, conf Config) ([]error, float64) {
+	errors := []error{}
 
-// CollectTotalErrors collects total errors.
-func (*InterfaceCollector) CollectTotalErrors() float64 {
-	return totalIfaceErrors
-}
-
-// Describe all metrics
-func (*InterfaceCollector) Describe(ch chan<- *prometheus.Desc) {
-	for _, desc := range getInterfaceDesc() {
-		ch <- desc
-	}
-}
-
-// Collect metric from a passed netconf.Session.
-func (c *InterfaceCollector) Collect(ch chan<- prometheus.Metric) {
-	s, err := netconf.DialSSH(sshTarget, sshClientConfig)
+	s, err := netconf.DialSSH(conf.SSHTarget, conf.SSHClientConfig)
 	if err != nil {
 		totalIfaceErrors++
-		ifaceErrors = append(ifaceErrors, fmt.Errorf("could not connect to %q: %s", sshTarget, err))
-		return
+		errors = append(errors, fmt.Errorf("could not connect to %q: %s", conf.SSHTarget, err))
+		return errors, totalIfaceErrors
 	}
 	defer s.Close()
 
 	reply, err := s.Exec(netconf.RawMethod(`<get-interface-information><extensive/></get-interface-information>`))
 	if err != nil {
 		totalIfaceErrors++
-		ifaceErrors = append(ifaceErrors, fmt.Errorf("could not execute netconf RPC call: %s", err))
-		return
+		errors = append(errors, fmt.Errorf("could not execute netconf RPC call: %s", err))
+		return errors, totalIfaceErrors
 	}
-	if err := processIfaceNetconfReply(reply, ch); err != nil {
+	if err := processIfaceNetconfReply(reply, ch, conf.IfaceDescrKeys, conf.IfaceMetricKeys); err != nil {
 		totalIfaceErrors++
-		ifaceErrors = append(ifaceErrors, err)
+		errors = append(errors, err)
 	}
+	return errors, totalIfaceErrors
 }
 
-func processIfaceNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric) error {
+func processIfaceNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric, ifaceDescrKeys, ifaceMetricKeys []string) error {
 	var netconfReply ifaceRPCReply
 
 	if err := xml.Unmarshal([]byte(reply.RawReply), &netconfReply); err != nil {
 		return fmt.Errorf("could not unmarshal netconf reply xml: %s", err)
 	}
 	for _, ifaceData := range netconfReply.InterfaceInformation.PhysicalInterface {
-		ifaceDesc := getInterfaceDesc()
+		ifaceDesc := getInterfaceDesc(ifaceDescrKeys, ifaceMetricKeys)
 		ifaceLabels := []string{strings.TrimSpace(ifaceData.Name.Text)}
 
 		if strings.TrimSpace(ifaceData.AdminStatus.Text) == "up" {
@@ -267,7 +250,7 @@ func processIfaceNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metr
 		}
 		for _, configuredKey := range ifaceMetricKeys {
 			if allIfaceDescrKeys[configuredKey] != nil {
-				newCounter(ch, ifaceDesc[configuredKey], strings.TrimSpace(allIfaceDescrKeys[configuredKey].(string)), strings.TrimSpace(ifaceData.Name.Text))				
+				newCounter(ch, ifaceDesc[configuredKey], strings.TrimSpace(allIfaceDescrKeys[configuredKey].(string)), strings.TrimSpace(ifaceData.Name.Text))
 			}
 		}
 		newCounter(ch, ifaceDesc["InterfaceFlapped"], ifaceData.InterfaceFlapped.Seconds, ifaceLabels...)
@@ -311,7 +294,7 @@ func processIfaceNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metr
 			}
 			if len(ifaceDescrKeys) > 0 {
 				ifaceDescrLabels := []string{strings.TrimSpace(logIface.Name.Text)}
-				
+
 				for _, configuredKey := range ifaceDescrKeys {
 					if allIfaceDescrKeys[configuredKey] == nil {
 						ifaceDescrLabels = append(ifaceDescrLabels, "")
@@ -323,7 +306,7 @@ func processIfaceNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metr
 			}
 			for _, configuredKey := range ifaceMetricKeys {
 				if allIfaceDescrKeys[configuredKey] != nil {
-					newCounter(ch, ifaceDesc[configuredKey], strings.TrimSpace(allIfaceDescrKeys[configuredKey].(string)), strings.TrimSpace(logIface.Name.Text))				
+					newCounter(ch, ifaceDesc[configuredKey], strings.TrimSpace(allIfaceDescrKeys[configuredKey].(string)), strings.TrimSpace(logIface.Name.Text))
 				}
 			}
 			trafficStatsSource := logIface.TransitTrafficStatistics
