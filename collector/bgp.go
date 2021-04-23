@@ -14,7 +14,7 @@ import (
 var (
 	bgpSubsystem = "bgp"
 
-	bgpPeerLabels     = []string{"peer"}
+	bgpPeerLabels     = []string{"peer", "local_interface"}
 	bgpRIBLabels      = []string{"address_family"}
 	bgpPeerRIBLabels  = append(bgpPeerLabels, bgpRIBLabels...)
 	bgpPeerTypeLabels = []string{"type"}
@@ -23,17 +23,17 @@ var (
 		"GroupCount":                       colPromDesc(bgpSubsystem, "groups", "Number of Configured Groups.", bgpNoLabels),
 		"PeerCount":                        colPromDesc(bgpSubsystem, "peers", "Number of Configured Peers.", bgpNoLabels),
 		"DownPeerCount":                    colPromDesc(bgpSubsystem, "down_peers", "Number of Peers that are Down.", bgpNoLabels),
-		"PeerInputMessages":                colPromDesc(bgpSubsystem, "peer_input_messages", "Number of Input Messages for a Peer.", bgpPeerLabels),
-		"PeerOutputMessages":               colPromDesc(bgpSubsystem, "peer_output_messages", "Number of Output Messages for a Peer.", bgpPeerLabels),
-		"PeerRouteQueueCount":              colPromDesc(bgpSubsystem, "peer_route_queue", "Number of Route Queues for a Peer.", bgpPeerLabels),
-		"PeerFlapCount":                    colPromDesc(bgpSubsystem, "peer_flaps", "Number of Time the Peer has Flapped.", bgpPeerLabels),
-		"PeerElapsedTime":                  colPromDesc(bgpSubsystem, "peer_elapsed_time_seconds", "Length of Time the Peer has Been Up.", bgpPeerLabels),
-		"PeerPeerState":                    colPromDesc(bgpSubsystem, "peer_up", "State of the Peer. (1 = Established, 0 = Down).", bgpPeerLabels),
+		"PeerInputMessages":                colPromDesc(bgpSubsystem, "peer_input_messages", "Number of Input Messages for a Peer.", bgpPeerRIBLabels),
+		"PeerOutputMessages":               colPromDesc(bgpSubsystem, "peer_output_messages", "Number of Output Messages for a Peer.", bgpPeerRIBLabels),
+		"PeerRouteQueueCount":              colPromDesc(bgpSubsystem, "peer_route_queue", "Number of Route Queues for a Peer.", bgpPeerRIBLabels),
+		"PeerFlapCount":                    colPromDesc(bgpSubsystem, "peer_flaps", "Number of Time the Peer has Flapped.", bgpPeerRIBLabels),
+		"PeerElapsedTime":                  colPromDesc(bgpSubsystem, "peer_elapsed_time_seconds", "Length of Time the Peer has Been Up.", bgpPeerRIBLabels),
+		"PeerPeerState":                    colPromDesc(bgpSubsystem, "peer_up", "State of the Peer. (1 = Established, 0 = Down).", bgpPeerRIBLabels),
 		"PeerRIBActivePrefixCount":         colPromDesc(bgpSubsystem, "peer_rib_active_prefixes", "Number of Active Prefixes for the Peer.", bgpPeerRIBLabels),
 		"PeerRIBReceivedPrefixCount":       colPromDesc(bgpSubsystem, "peer_rib_received_prefixes", "Number of Received Prefixes for the Peer.", bgpPeerRIBLabels),
 		"PeerRIBAcceptedPrefixCount":       colPromDesc(bgpSubsystem, "peer_rib_accepted_prefixes", "Number of Accepted Prefixes for the Peer.", bgpPeerRIBLabels),
 		"PeerRIBSuppressedPrefixCount":     colPromDesc(bgpSubsystem, "peer_rib_suppressed_prefixes", "Number of Suppressed Prefixes for the Peer.", bgpPeerRIBLabels),
-		"PeerRIBAdvertisedPrefixCount":     colPromDesc(bgpSubsystem, "peer_rib_advertised_prefixes", "Number of Advertised Prefixes for the Peer.", bgpPeerLabels),
+		"PeerRIBAdvertisedPrefixCount":     colPromDesc(bgpSubsystem, "peer_rib_advertised_prefixes", "Number of Advertised Prefixes for the Peer.", bgpPeerRIBLabels),
 		"RIBTotalPrefixCount":              colPromDesc(bgpSubsystem, "rib_total_prefixes", "Total Number of Prefixes in the RIB.", bgpRIBLabels),
 		"RIBReceivedPrefixCount":           colPromDesc(bgpSubsystem, "rib_received_prefixes", "Number of Received Prefixes in the RIB.", bgpRIBLabels),
 		"RIBAcceptedPrefixCount":           colPromDesc(bgpSubsystem, "rib_accepted_prefixes", "Number of Accepted Prefixes in the RIB.", bgpRIBLabels),
@@ -93,7 +93,13 @@ func (c *BGPCollector) Get(ch chan<- prometheus.Metric, conf Config) ([]error, f
 		return errors, totalBGPErrors
 	}
 
-	if err := processBGPNetconfReply(reply, ch, conf.BGPTypeKeys); err != nil {
+	bgpPeerInterfaces, err := getBgpPeerInterface(replyNeighbor)
+	if err != nil {
+		totalBGPErrors++
+		errors = append(errors, err)
+	}
+
+	if err := processBGPNetconfReply(reply, ch, conf.BGPTypeKeys, bgpPeerInterfaces); err != nil {
 		totalBGPErrors++
 		errors = append(errors, err)
 	}
@@ -105,13 +111,33 @@ func (c *BGPCollector) Get(ch chan<- prometheus.Metric, conf Config) ([]error, f
 	return errors, totalBGPErrors
 }
 
+func getBgpPeerInterface(reply *netconf.RPCReply) (map[string]string, error) {
+	peerToInterface := make(map[string]string)
+	var netconfReply bgpNeighborRPCReply
+	if err := xml.Unmarshal([]byte(reply.RawReply), &netconfReply); err != nil {
+		return peerToInterface, fmt.Errorf("could not unmarshal netconf reply xml: %s", err)
+	}
+	for _, peerData := range netconfReply.BgpInformation.BgpPeer {
+		if peerData.PeerAddress != "" {
+			// Junos 17 & 18 uses <peer-address>
+			peerAddSplit := strings.Split(peerData.PeerAddress, "+")
+			peerToInterface[peerAddSplit[0]] = peerData.LocalInterfaceName
+		} else if peerData.BGPPeerHeader.PeerAddress != "" {
+			// Junos 19 uses <bgp-peer-header><peer-address>
+			peerAddSplit := strings.Split(peerData.BGPPeerHeader.PeerAddress, "+")
+			peerToInterface[peerAddSplit[0]] = peerData.LocalInterfaceName
+		}
+	}
+	return peerToInterface, nil
+}
+
 func processBGPNeighborNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric) error {
 	var netconfReply bgpNeighborRPCReply
-
 	if err := xml.Unmarshal([]byte(reply.RawReply), &netconfReply); err != nil {
 		return fmt.Errorf("could not unmarshal netconf reply xml: %s", err)
 	}
 	for _, peerData := range netconfReply.BgpInformation.BgpPeer {
+		// define <peer-address>
 		peerAddress := ""
 		if peerData.PeerAddress != "" {
 			// Junos 17 & 18 uses <peer-address>
@@ -120,24 +146,32 @@ func processBGPNeighborNetconfReply(reply *netconf.RPCReply, ch chan<- prometheu
 			// Junos 19 uses <bgp-peer-header><peer-address>
 			peerAddress = peerData.BGPPeerHeader.PeerAddress
 		}
+
+		// define <local-interface-name>
+		localInterfaceName := peerData.LocalInterfaceName
+
+		// define peer labels
 		if peerAddress != "" {
 			re := regexp.MustCompile(`\+.*`)
-			peerLabels := []string{re.ReplaceAllString(strings.TrimSpace(peerAddress), "")}
+			peerLabels := []string{re.ReplaceAllString(strings.TrimSpace(peerAddress), ""), strings.TrimSpace(localInterfaceName), strings.TrimSpace(peerData.BgpRib.Name)}
 			newGauge(ch, bgpDesc["PeerRIBAdvertisedPrefixCount"], peerData.BgpRib.AdvertisedPrefixCount, peerLabels...)
 		}
 	}
 	return nil
 }
 
-func processBGPNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric, bgpTypeKeys []string) error {
+func processBGPNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric, bgpTypeKeys []string, bgpPeerInterfaces map[string]string) error {
 	var netconfReply bgpRPCReply
-
 	if err := xml.Unmarshal([]byte(reply.RawReply), &netconfReply); err != nil {
 		return fmt.Errorf("could not unmarshal netconf reply xml: %s", err)
 	}
 	peerTypes := make(map[string]float64)
 	for _, peerData := range netconfReply.BGPInformation.BGPPeer {
-		peerLabels := []string{strings.TrimSpace(peerData.PeerAddress.Text)}
+		peerInterfaceLocal := ""
+		if val, exists := bgpPeerInterfaces[peerData.PeerAddress.Text]; exists {
+			peerInterfaceLocal = val
+		}
+		peerLabels := []string{strings.TrimSpace(peerData.PeerAddress.Text), strings.TrimSpace(peerInterfaceLocal)}
 		var peerType map[string]string
 		if len(bgpTypeKeys) > 0 && peerData.Description.Text != "" {
 			if err := json.Unmarshal([]byte(peerData.Description.Text), &peerType); err == nil {
@@ -150,29 +184,28 @@ func processBGPNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric
 				}
 			}
 		}
-		if strings.ToLower(peerData.PeerState.Text) == "established" {
-			ch <- prometheus.MustNewConstMetric(bgpDesc["PeerPeerState"], prometheus.GaugeValue, 1.0, peerLabels...)
-			for _, descKey := range bgpTypeKeys {
-				if peerType[descKey] != "" {
-					peerTypes[strings.TrimSpace(peerType[descKey])]++
-				}
-			}
-		} else {
-			ch <- prometheus.MustNewConstMetric(bgpDesc["PeerPeerState"], prometheus.GaugeValue, 0.0, peerLabels...)
-		}
-		newCounter(ch, bgpDesc["PeerInputMessages"], peerData.InputMessages.Text, peerLabels...)
-		newCounter(ch, bgpDesc["PeerOutputMessages"], peerData.OutputMessages.Text, peerLabels...)
-		newGauge(ch, bgpDesc["PeerRouteQueueCount"], peerData.RouteQueueCount.Text, peerLabels...)
-		newCounter(ch, bgpDesc["PeerFlapCount"], peerData.FlapCount.Text, peerLabels...)
-		newGauge(ch, bgpDesc["PeerElapsedTime"], peerData.ElapsedTime.Seconds, peerLabels...)
 		for _, ribData := range peerData.BGPRIB {
 			peerRIBLabels := append(peerLabels, ribData.Name.Text)
+			if strings.ToLower(peerData.PeerState.Text) == "established" {
+				ch <- prometheus.MustNewConstMetric(bgpDesc["PeerPeerState"], prometheus.GaugeValue, 1.0, peerRIBLabels...)
+				for _, descKey := range bgpTypeKeys {
+					if peerType[descKey] != "" {
+						peerTypes[strings.TrimSpace(peerType[descKey])]++
+					}
+				}
+			} else {
+				ch <- prometheus.MustNewConstMetric(bgpDesc["PeerPeerState"], prometheus.GaugeValue, 0.0, peerRIBLabels...)
+			}
+			newCounter(ch, bgpDesc["PeerInputMessages"], peerData.InputMessages.Text, peerRIBLabels...)
+			newCounter(ch, bgpDesc["PeerOutputMessages"], peerData.OutputMessages.Text, peerRIBLabels...)
+			newGauge(ch, bgpDesc["PeerRouteQueueCount"], peerData.RouteQueueCount.Text, peerRIBLabels...)
+			newCounter(ch, bgpDesc["PeerFlapCount"], peerData.FlapCount.Text, peerRIBLabels...)
+			newGauge(ch, bgpDesc["PeerElapsedTime"], peerData.ElapsedTime.Seconds, peerRIBLabels...)
 			newGauge(ch, bgpDesc["PeerRIBActivePrefixCount"], ribData.ActivePrefixCount.Text, peerRIBLabels...)
 			newGauge(ch, bgpDesc["PeerRIBReceivedPrefixCount"], ribData.ReceivedPrefixCount.Text, peerRIBLabels...)
 			newGauge(ch, bgpDesc["PeerRIBAcceptedPrefixCount"], ribData.AcceptedPrefixCount.Text, peerRIBLabels...)
 			newGauge(ch, bgpDesc["PeerRIBSuppressedPrefixCount"], ribData.SuppressedPrefixCount.Text, peerRIBLabels...)
 		}
-
 	}
 	for peerType, count := range peerTypes {
 		ch <- prometheus.MustNewConstMetric(bgpDesc["PeerTypesUp"], prometheus.GaugeValue, count, peerType)
@@ -215,12 +248,22 @@ type bgpNeighborInformation struct {
 }
 
 type bgpNeighborPeer struct {
-	PeerAddress   string         `xml:"peer-address"`
-	BGPPeerHeader bgpPeerHeader  `xml:"bgp-peer-header"`
-	BgpRib        bgpNeighborRIB `xml:"bgp-rib"`
+	PeerAddress        string         `xml:"peer-address"`
+	BGPPeerHeader      bgpPeerHeader  `xml:"bgp-peer-header"`
+	BgpRib             bgpNeighborRIB `xml:"bgp-rib"`
+	LocalInterfaceName string         `xml:"local-interface-name"`
 }
 
 type bgpNeighborRIB struct {
+	Name                  string `xml:"name"`
+	RibBit                string `xml:"rib-bit"`
+	BgpRibState           string `xml:"bgp-rib-state"`
+	VpnRibState           string `xml:"vpn-rib-state"`
+	SendState             string `xml:"send-state"`
+	ActivePrefixCount     string `xml:"active-prefix-count"`
+	ReceivedPrefixCount   string `xml:"received-prefix-count"`
+	AcceptedPrefixCount   string `xml:"accepted-prefix-count"`
+	SuppressedPrefixCount string `xml:"suppressed-prefix-count"`
 	AdvertisedPrefixCount string `xml:"advertised-prefix-count"`
 }
 
@@ -267,16 +310,17 @@ type bgpRIB struct {
 }
 
 type bgpPeer struct {
-	PeerAddress     bgpText      `xml:"peer-address"`
-	PeerAs          bgpText      `xml:"peer-as"`
-	InputMessages   bgpText      `xml:"input-messages"`
-	OutputMessages  bgpText      `xml:"output-messages"`
-	RouteQueueCount bgpText      `xml:"route-queue-count"`
-	FlapCount       bgpText      `xml:"flap-count"`
-	Description     bgpText      `xml:"description"`
-	ElapsedTime     bgpSeconds   `xml:"elapsed-time"`
-	PeerState       bgpText      `xml:"peer-state"`
-	BGPRIB          []bgpPeerRIB `xml:"bgp-rib"`
+	PeerAddress        bgpText      `xml:"peer-address"`
+	PeerAs             bgpText      `xml:"peer-as"`
+	InputMessages      bgpText      `xml:"input-messages"`
+	OutputMessages     bgpText      `xml:"output-messages"`
+	RouteQueueCount    bgpText      `xml:"route-queue-count"`
+	FlapCount          bgpText      `xml:"flap-count"`
+	Description        bgpText      `xml:"description"`
+	ElapsedTime        bgpSeconds   `xml:"elapsed-time"`
+	PeerState          bgpText      `xml:"peer-state"`
+	BGPRIB             []bgpPeerRIB `xml:"bgp-rib"`
+	LocalInterfaceName bgpText      `xml:"local-interface-name"`
 }
 
 type bgpPeerRIB struct {
@@ -286,6 +330,7 @@ type bgpPeerRIB struct {
 	AcceptedPrefixCount   bgpText `xml:"accepted-prefix-count"`
 	SuppressedPrefixCount bgpText `xml:"suppressed-prefix-count"`
 }
+
 type bgpPeerHeader struct {
 	PeerAddress  string `xml:"peer-address"`
 	PeerAs       string `xml:"peer-as"`
