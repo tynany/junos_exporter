@@ -14,7 +14,7 @@ import (
 var (
 	bgpSubsystem = "bgp"
 
-	bgpPeerLabels     = []string{"peer", "local_interface"}
+	bgpPeerLabels     = []string{"peer", "interface"}
 	bgpRIBLabels      = []string{"address_family"}
 	bgpPeerRIBLabels  = append(bgpPeerLabels, bgpRIBLabels...)
 	bgpPeerTypeLabels = []string{"type"}
