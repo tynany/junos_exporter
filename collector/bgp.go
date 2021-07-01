@@ -14,15 +14,14 @@ import (
 var (
 	bgpSubsystem = "bgp"
 
-	bgpPeerLabels     = []string{"peer", "interface"}
+	bgpPeerLabels     = []string{"peer", "interface", "peer_address_family"}
 	bgpRIBLabels      = []string{"routing_instance"}
 	bgpPeerRIBLabels  = append(bgpPeerLabels, bgpRIBLabels...)
 	bgpPeerTypeLabels = []string{"type"}
-	bgpNoLabels       = []string{}
 	bgpDesc           = map[string]*prometheus.Desc{
-		"GroupCount":                       colPromDesc(bgpSubsystem, "groups", "Number of Configured Groups.", bgpNoLabels),
-		"PeerCount":                        colPromDesc(bgpSubsystem, "peers", "Number of Configured Peers.", bgpNoLabels),
-		"DownPeerCount":                    colPromDesc(bgpSubsystem, "down_peers", "Number of Peers that are Down.", bgpNoLabels),
+		"GroupCount":                       colPromDesc(bgpSubsystem, "groups", "Number of Configured Groups.", bgpRIBLabels),
+		"PeerCount":                        colPromDesc(bgpSubsystem, "peers", "Number of Configured Peers.", bgpRIBLabels),
+		"DownPeerCount":                    colPromDesc(bgpSubsystem, "down_peers", "Number of Peers that are Down.", bgpRIBLabels),
 		"PeerInputMessages":                colPromDesc(bgpSubsystem, "peer_input_messages", "Number of Input Messages for a Peer.", bgpPeerRIBLabels),
 		"PeerOutputMessages":               colPromDesc(bgpSubsystem, "peer_output_messages", "Number of Output Messages for a Peer.", bgpPeerRIBLabels),
 		"PeerRouteQueueCount":              colPromDesc(bgpSubsystem, "peer_route_queue", "Number of Route Queues for a Peer.", bgpPeerRIBLabels),
@@ -109,13 +108,37 @@ func (c *BGPCollector) Get(ch chan<- prometheus.Metric, conf Config) ([]error, f
 		errors = append(errors, err)
 	}
 
-	routeInstances, err := getInstanceNameToRibName(replyRouteInstance)
+	routeInstances, routeInstanceNames, err := getInstanceNameToRibName(replyRouteInstance)
 	if err != nil {
 		totalBGPErrors++
 		errors = append(errors, err)
 	}
 
-	if err := processBGPNetconfReply(reply, replyNeighbor, ch, conf.BGPTypeKeys, bgpPeerInterfaces, routeInstances); err != nil {
+	replyBgpSummaryInstance := make(map[string]*netconf.RPCReply)
+	for routeInstance := range routeInstanceNames {
+		// filter out default routing instances that are reserved so we dont pull un-necessary RPC calls
+		if !strings.Contains(routeInstance, "__master") && !strings.Contains(routeInstance, "__juniper") && !strings.Contains(routeInstance, "mgmt_junos") {
+			routeInstanceCommand := fmt.Sprintf(`<get-bgp-summary-information><instance>%s</instance></get-bgp-summary-information>`, routeInstance)
+			replyBgpSummaryVrf, err := s.Exec(netconf.RawMethod(routeInstanceCommand))
+			replyBgpSummaryInstance[routeInstance] = replyBgpSummaryVrf
+			if err != nil {
+				totalBGPErrors++
+				errors = append(errors, fmt.Errorf("could not execute netconf RPC call: %s", err))
+				return errors, totalBGPErrors
+			}
+		}
+	}
+
+	if err := processBGPNetconfReply(
+		reply,
+		replyNeighbor,
+		replyBgpSummaryInstance,
+		ch,
+		conf.BGPTypeKeys,
+		bgpPeerInterfaces,
+		routeInstances,
+		routeInstanceNames,
+	); err != nil {
 		totalBGPErrors++
 		errors = append(errors, err)
 	}
@@ -127,18 +150,20 @@ func (c *BGPCollector) Get(ch chan<- prometheus.Metric, conf Config) ([]error, f
 	return errors, totalBGPErrors
 }
 
-func getInstanceNameToRibName(reply *netconf.RPCReply) (map[string]string, error) {
+func getInstanceNameToRibName(reply *netconf.RPCReply) (map[string]string, map[string]string, error) {
 	instanceToIribName := make(map[string]string)
+	routeInstanceNames := make(map[string]string)
 	var netconfRouteInstanceReply routeInstanceRPCReply
 	if err := xml.Unmarshal([]byte(reply.RawReply), &netconfRouteInstanceReply); err != nil {
-		return instanceToIribName, fmt.Errorf("could not unmarshal netconf reply xml: %s", err)
+		return instanceToIribName, routeInstanceNames, fmt.Errorf("could not unmarshal netconf reply xml: %s", err)
 	}
 	for _, instanceCore := range netconfRouteInstanceReply.InstanceInformation.InstanceCore {
+		routeInstanceNames[instanceCore.InstanceName] = instanceCore.InstanceName
 		for _, iriB := range instanceCore.InstanceRib {
 			instanceToIribName[iriB.IribName] = instanceCore.InstanceName
 		}
 	}
-	return instanceToIribName, nil
+	return instanceToIribName, routeInstanceNames, nil
 }
 
 func getBgpPeerInterface(reply *netconf.RPCReply) (map[string]string, error) {
@@ -187,6 +212,7 @@ func processBGPNeighborNetconfReply(reply *netconf.RPCReply, ch chan<- prometheu
 				re.ReplaceAllString(strings.TrimSpace(peerAddress), ""),
 				strings.TrimSpace(localInterfaceName),
 				strings.TrimSpace(peerData.PeerCfgRti.Text),
+				strings.TrimSpace(peerData.NlriTypePeer),
 			}
 			newGauge(ch, bgpDesc["PeerRIBAdvertisedPrefixCount"], peerData.BGPRIB.AdvertisedPrefixCount, peerLabels...)
 		}
@@ -197,14 +223,17 @@ func processBGPNeighborNetconfReply(reply *netconf.RPCReply, ch chan<- prometheu
 func processBGPNetconfReply(
 	reply *netconf.RPCReply,
 	replyNeighbor *netconf.RPCReply,
+	replyBgpSummaryInstance map[string]*netconf.RPCReply,
 	ch chan<- prometheus.Metric,
 	bgpTypeKeys []string,
 	bgpPeerInterfaces map[string]string,
 	routeInstances map[string]string,
+	routeInstanceNames map[string]string,
 ) error {
 
 	var netconfReply bgpNeighborRPCReply
 	var netconfInfoReply bgpRPCReply
+	routeInstanceCheck := make(map[string]string)
 
 	if err := xml.Unmarshal([]byte(replyNeighbor.RawReply), &netconfReply); err != nil {
 		return fmt.Errorf("could not unmarshal netconf reply xml: %s", err)
@@ -214,11 +243,47 @@ func processBGPNetconfReply(
 		return fmt.Errorf("could not unmarshal netconf reply xml: %s", err)
 	}
 
+	// loop through route instances, unmarshall, only gather RIB totals once per route instance
+	for routeInstanceBGP := range replyBgpSummaryInstance {
+		var netconfReplyInstance bgpRPCReplyInstance
+		if err := xml.Unmarshal([]byte(replyBgpSummaryInstance[routeInstanceBGP].RawReply), &netconfReplyInstance); err != nil {
+			return fmt.Errorf("could not unmarshal netconf reply xml: %s", err)
+		}
+		ribLabels := []string{routeInstanceBGP}
+		newGauge(ch, bgpDesc["GroupCount"], netconfReplyInstance.BgpInformation.GroupCount, ribLabels...)
+		newGauge(ch, bgpDesc["PeerCount"], netconfReplyInstance.BgpInformation.PeerCount, ribLabels...)
+		newGauge(ch, bgpDesc["DownPeerCount"], netconfReplyInstance.BgpInformation.DownPeerCount, ribLabels...)
+		for routeInstance := range routeInstances {
+			if routeInstanceBGP == routeInstances[routeInstance] {
+				for _, ribData := range netconfReplyInstance.BgpInformation.BgpRib {
+					if ribData.Name == routeInstance {
+						if val, ok := routeInstanceCheck[routeInstanceBGP]; !ok {
+							routeInstanceCheck[routeInstanceBGP] = val
+							newGauge(ch, bgpDesc["RIBTotalPrefixCount"], ribData.TotalPrefixCount, ribLabels...)
+							newGauge(ch, bgpDesc["RIBHistoryPrefixCount"], ribData.HistoryPrefixCount, ribLabels...)
+							newGauge(ch, bgpDesc["RIBDampedPrefixCount"], ribData.DampedPrefixCount, ribLabels...)
+							newGauge(ch, bgpDesc["RIBTotalExternalPrefixCount"], ribData.TotalExternalPrefixCount, ribLabels...)
+							newGauge(ch, bgpDesc["RIBActiveExternalPrefixCount"], ribData.ActiveExternalPrefixCount, ribLabels...)
+							newGauge(ch, bgpDesc["RIBAcceptedExternalPrefixCount"], ribData.AcceptedExternalPrefixCount, ribLabels...)
+							newGauge(ch, bgpDesc["RIBSuppressedExternalPrefixCount"], ribData.SuppressedExternalPrefixCount, ribLabels...)
+							newGauge(ch, bgpDesc["RIBTotalInternalPrefixCount"], ribData.TotalInternalPrefixCount, ribLabels...)
+							newGauge(ch, bgpDesc["RIBActiveInternalPrefixCount"], ribData.ActiveInternalPrefixCount, ribLabels...)
+							newGauge(ch, bgpDesc["RIBAcceptedInternalPrefixCount"], ribData.AcceptedInternalPrefixCount, ribLabels...)
+							newGauge(ch, bgpDesc["RIBSuppressedInternalPrefixCount"], ribData.SuppressedInternalPrefixCount, ribLabels...)
+							newGauge(ch, bgpDesc["RIBPendingPrefixCount"], ribData.PendingPrefixCount, ribLabels...)
+						}
+					}
+				}
+			}
+		}
+	}
+
 	peerTypes := make(map[string]float64)
 
 	for _, peerData := range netconfReply.BgpInformation.BgpPeer {
 		peerInterfaceLocal := ""
 		peerAddress := ""
+		peerAddressFamily := peerData.NlriTypePeer
 
 		if peerData.PeerAddress != "" {
 			// Junos 17 & 18 uses <peer-address>
@@ -234,7 +299,7 @@ func processBGPNetconfReply(
 			peerInterfaceLocal = val
 		}
 
-		peerLabels := []string{strings.TrimSpace(peerAddress), strings.TrimSpace(peerInterfaceLocal)}
+		peerLabels := []string{strings.TrimSpace(peerAddress), strings.TrimSpace(peerInterfaceLocal), strings.TrimSpace(peerAddressFamily)}
 		var peerType map[string]string
 
 		if len(bgpTypeKeys) > 0 && peerData.Description.Text != "" {
@@ -277,31 +342,10 @@ func processBGPNetconfReply(
 		ch <- prometheus.MustNewConstMetric(bgpDesc["PeerTypesUp"], prometheus.GaugeValue, count, peerType)
 	}
 
-	for _, ribData := range netconfInfoReply.BGPInformation.BGPRIB {
-		if routeInstances[ribData.Name.Text] == ribData.Name.Text {
-			ribLabels := []string{routeInstances[ribData.Name.Text]}
-			newGauge(ch, bgpDesc["RIBTotalPrefixCount"], ribData.TotalPrefixCount.Text, ribLabels...)
-			newGauge(ch, bgpDesc["RIBHistoryPrefixCount"], ribData.HistoryPrefixCount.Text, ribLabels...)
-			newGauge(ch, bgpDesc["RIBDampedPrefixCount"], ribData.DampedPrefixCount.Text, ribLabels...)
-			newGauge(ch, bgpDesc["RIBTotalExternalPrefixCount"], ribData.TotalExternalPrefixCount.Text, ribLabels...)
-			newGauge(ch, bgpDesc["RIBActiveExternalPrefixCount"], ribData.ActiveExternalPrefixCount.Text, ribLabels...)
-			newGauge(ch, bgpDesc["RIBAcceptedExternalPrefixCount"], ribData.AcceptedExternalPrefixCount.Text, ribLabels...)
-			newGauge(ch, bgpDesc["RIBSuppressedExternalPrefixCount"], ribData.SuppressedExternalPrefixCount.Text, ribLabels...)
-			newGauge(ch, bgpDesc["RIBTotalInternalPrefixCount"], ribData.TotalInternalPrefixCount.Text, ribLabels...)
-			newGauge(ch, bgpDesc["RIBActiveInternalPrefixCount"], ribData.ActiveInternalPrefixCount.Text, ribLabels...)
-			newGauge(ch, bgpDesc["RIBAcceptedInternalPrefixCount"], ribData.AcceptedInternalPrefixCount.Text, ribLabels...)
-			newGauge(ch, bgpDesc["RIBSuppressedInternalPrefixCount"], ribData.SuppressedInternalPrefixCount.Text, ribLabels...)
-			newGauge(ch, bgpDesc["RIBPendingPrefixCount"], ribData.PendingPrefixCount.Text, ribLabels...)
-		}
-	}
-
-	newGauge(ch, bgpDesc["GroupCount"], netconfInfoReply.BGPInformation.GroupCount.Text)
-	newGauge(ch, bgpDesc["PeerCount"], netconfInfoReply.BGPInformation.PeerCount.Text)
-	newGauge(ch, bgpDesc["DownPeerCount"], netconfInfoReply.BGPInformation.DownPeerCount.Text)
-
 	return nil
 }
 
+// ********************* show route instance START ********************* //
 type routeInstanceRPCReply struct {
 	XMLName             xml.Name                 `xml:"rpc-reply"`
 	InstanceInformation routeInstanceInformation `xml:"instance-information"`
@@ -325,15 +369,86 @@ type routeInstanceRib struct {
 	IribHiddenCount   string `xml:"irib-hidden-count"`
 }
 
+// ********************* show route instance END *********************
+
+// ********************* show bgp summary instance [INSTANCE] START ********************* //
+type bgpRPCReplyInstance struct {
+	XMLName        xml.Name           `xml:"rpc-reply"`
+	BgpInformation bgpSummaryInstance `xml:"bgp-information"`
+}
+type bgpSummaryInstance struct {
+	Text          string                   `xml:",chardata"`
+	Xmlns         string                   `xml:"xmlns,attr"`
+	BgpThreadMode string                   `xml:"bgp-thread-mode"`
+	ThreadState   string                   `xml:"thread-state"`
+	GroupCount    string                   `xml:"group-count"`
+	PeerCount     string                   `xml:"peer-count"`
+	DownPeerCount string                   `xml:"down-peer-count"`
+	BgpRib        []bgpSummaryInstanceRib  `xml:"bgp-rib"`
+	BgpPeer       []bgpSummaryInstancePeer `xml:"bgp-peer"`
+}
+type bgpSummaryInstanceRib struct {
+	Text                          string `xml:",chardata"`
+	Name                          string `xml:"name"`
+	TotalPrefixCount              string `xml:"total-prefix-count"`
+	ReceivedPrefixCount           string `xml:"received-prefix-count"`
+	AcceptedPrefixCount           string `xml:"accepted-prefix-count"`
+	ActivePrefixCount             string `xml:"active-prefix-count"`
+	SuppressedPrefixCount         string `xml:"suppressed-prefix-count"`
+	HistoryPrefixCount            string `xml:"history-prefix-count"`
+	DampedPrefixCount             string `xml:"damped-prefix-count"`
+	TotalExternalPrefixCount      string `xml:"total-external-prefix-count"`
+	ActiveExternalPrefixCount     string `xml:"active-external-prefix-count"`
+	AcceptedExternalPrefixCount   string `xml:"accepted-external-prefix-count"`
+	SuppressedExternalPrefixCount string `xml:"suppressed-external-prefix-count"`
+	TotalInternalPrefixCount      string `xml:"total-internal-prefix-count"`
+	ActiveInternalPrefixCount     string `xml:"active-internal-prefix-count"`
+	AcceptedInternalPrefixCount   string `xml:"accepted-internal-prefix-count"`
+	SuppressedInternalPrefixCount string `xml:"suppressed-internal-prefix-count"`
+	PendingPrefixCount            string `xml:"pending-prefix-count"`
+	BgpRibState                   string `xml:"bgp-rib-state"`
+	VpnRibState                   string `xml:"vpn-rib-state"`
+}
+type bgpSummaryInstancePeer struct {
+	Text            string                            `xml:",chardata"`
+	PeerAddress     string                            `xml:"peer-address"`
+	PeerAs          string                            `xml:"peer-as"`
+	InputMessages   string                            `xml:"input-messages"`
+	OutputMessages  string                            `xml:"output-messages"`
+	RouteQueueCount string                            `xml:"route-queue-count"`
+	FlapCount       string                            `xml:"flap-count"`
+	ElapsedTime     bgpSummaryInstancePeerElapsedTime `xml:"elapsed-time"`
+	PeerState       bgpSummaryInstancePeerPeerState   `xml:"peer-state"`
+	BgpRib          bgpSummaryInstancePeerBgpRib      `xml:"bgp-rib"`
+	Description     string                            `xml:"description"`
+}
+type bgpSummaryInstancePeerElapsedTime struct {
+	Text    string `xml:",chardata"`
+	Seconds string `xml:"seconds,attr"`
+}
+type bgpSummaryInstancePeerPeerState struct {
+	Text   string `xml:",chardata"`
+	Format string `xml:"format,attr"`
+}
+type bgpSummaryInstancePeerBgpRib struct {
+	Text                  string `xml:",chardata"`
+	Name                  string `xml:"name"`
+	ActivePrefixCount     string `xml:"active-prefix-count"`
+	ReceivedPrefixCount   string `xml:"received-prefix-count"`
+	AcceptedPrefixCount   string `xml:"accepted-prefix-count"`
+	SuppressedPrefixCount string `xml:"suppressed-prefix-count"`
+}
+
+// ********************* show bgp summary instance [INSTANCE] END ********************* //
+
+// ********************* show bgp neighbor START ********************* //
 type bgpNeighborRPCReply struct {
 	XMLName        xml.Name               `xml:"rpc-reply"`
 	BgpInformation bgpNeighborInformation `xml:"bgp-information"`
 }
-
 type bgpNeighborInformation struct {
 	BgpPeer []bgpNeighborPeer `xml:"bgp-peer"`
 }
-
 type bgpNeighborPeer struct {
 	PeerAddress        string        `xml:"peer-address"`
 	BGPPeerHeader      bgpPeerHeader `xml:"bgp-peer-header"`
@@ -348,13 +463,34 @@ type bgpNeighborPeer struct {
 	PeerState          bgpText       `xml:"peer-state"`
 	BGPRIB             bgpPeerRIB    `xml:"bgp-rib"`
 	PeerCfgRti         bgpText       `xml:"peer-cfg-rti"`
+	NlriTypePeer       string        `xml:"nlri-type-peer"`
+}
+type bgpPeerRIB struct {
+	Name                  string `xml:"name"`
+	RibBit                string `xml:"rib-bit"`
+	BgpRibState           string `xml:"bgp-rib-state"`
+	VpnRibState           string `xml:"vpn-rib-state"`
+	SendState             string `xml:"send-state"`
+	ActivePrefixCount     string `xml:"active-prefix-count"`
+	ReceivedPrefixCount   string `xml:"received-prefix-count"`
+	AcceptedPrefixCount   string `xml:"accepted-prefix-count"`
+	SuppressedPrefixCount string `xml:"suppressed-prefix-count"`
+	AdvertisedPrefixCount string `xml:"advertised-prefix-count"`
+}
+type bgpPeerHeader struct {
+	PeerAddress  string `xml:"peer-address"`
+	PeerAs       string `xml:"peer-as"`
+	LocalAddress string `xml:"local-address"`
+	LocalAs      string `xml:"local-as"`
 }
 
+// ********************* show bgp neighbor END *********************
+
+// ********************* show bgp summary START *********************
 type bgpRPCReply struct {
 	XMLName        xml.Name       `xml:"rpc-reply"`
 	BGPInformation bgpInformation `xml:"bgp-information"`
 }
-
 type bgpInformation struct {
 	GroupCount    bgpText   `xml:"group-count"`
 	PeerCount     bgpText   `xml:"peer-count"`
@@ -362,7 +498,6 @@ type bgpInformation struct {
 	BGPRIB        []bgpRIB  `xml:"bgp-rib"`
 	BGPPeer       []bgpPeer `xml:"bgp-peer"`
 }
-
 type bgpRIB struct {
 	Name                          bgpText `xml:"name"`
 	TotalPrefixCount              bgpText `xml:"total-prefix-count"`
@@ -383,7 +518,6 @@ type bgpRIB struct {
 	PendingPrefixCount            bgpText `xml:"pending-prefix-count"`
 	BGPRIBState                   bgpText `xml:"bgp-rib-state"`
 }
-
 type bgpPeer struct {
 	PeerAddress        bgpText    `xml:"peer-address"`
 	PeerAs             bgpText    `xml:"peer-as"`
@@ -397,46 +531,11 @@ type bgpPeer struct {
 	BGPRIB             []bgpRIB   `xml:"bgp-rib"`
 	LocalInterfaceName bgpText    `xml:"local-interface-name"`
 }
-
 type bgpText struct {
 	Text string `xml:",chardata"`
 }
-
 type bgpSeconds struct {
 	Seconds string `xml:"seconds,attr"`
 }
 
-type BgpPeer struct {
-	PeerAddress        bgpText    `xml:"peer-address"`
-	PeerAs             bgpText    `xml:"peer-as"`
-	InputMessages      bgpText    `xml:"input-messages"`
-	OutputMessages     bgpText    `xml:"output-messages"`
-	RouteQueueCount    bgpText    `xml:"route-queue-count"`
-	FlapCount          bgpText    `xml:"flap-count"`
-	Description        bgpText    `xml:"description"`
-	ElapsedTime        bgpSeconds `xml:"elapsed-time"`
-	PeerState          bgpText    `xml:"peer-state"`
-	BGPRIB             bgpPeerRIB `xml:"bgp-rib"`
-	LocalInterfaceName bgpText    `xml:"local-interface-name"`
-	PeerCfgRti         bgpText    `xml:"peer-cfg-rti"`
-}
-
-type bgpPeerRIB struct {
-	Name                  string `xml:"name"`
-	RibBit                string `xml:"rib-bit"`
-	BgpRibState           string `xml:"bgp-rib-state"`
-	VpnRibState           string `xml:"vpn-rib-state"`
-	SendState             string `xml:"send-state"`
-	ActivePrefixCount     string `xml:"active-prefix-count"`
-	ReceivedPrefixCount   string `xml:"received-prefix-count"`
-	AcceptedPrefixCount   string `xml:"accepted-prefix-count"`
-	SuppressedPrefixCount string `xml:"suppressed-prefix-count"`
-	AdvertisedPrefixCount string `xml:"advertised-prefix-count"`
-}
-
-type bgpPeerHeader struct {
-	PeerAddress  string `xml:"peer-address"`
-	PeerAs       string `xml:"peer-as"`
-	LocalAddress string `xml:"local-address"`
-	LocalAs      string `xml:"local-as"`
-}
+// ********************* show bgp summary END *********************
