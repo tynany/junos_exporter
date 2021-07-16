@@ -41,6 +41,7 @@ func initCollectors() {
 	collectors = append(collectors, collector.NewEnvCollector())
 	collectors = append(collectors, collector.NewPowerCollector())
 	collectors = append(collectors, collector.NewRECollector())
+  collectors = append(collectors, collector.NewIpsecCollector())
 }
 
 func validateRequest(configParam string, targetParam string) error {
