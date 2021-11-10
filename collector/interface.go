@@ -200,12 +200,21 @@ func (c *InterfaceCollector) Get(ch chan<- prometheus.Metric, conf Config) ([]er
 	return errors, totalIfaceErrors
 }
 
+func (c *BoolIfPresent) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+	var v string
+	d.DecodeElement(&v, &start)
+	*c = true
+	return nil
+}
+
 func processIfaceNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric, ifaceDescrKeys, ifaceMetricKeys []string) error {
 	var netconfReply ifaceRPCReply
-
-	if err := xml.Unmarshal([]byte(reply.RawReply), &netconfReply); err != nil {
+	r := strings.NewReader(reply.RawReply)
+	d := xml.NewDecoder(r)
+	if err := d.Decode(&netconfReply); err != nil {
 		return fmt.Errorf("could not unmarshal netconf reply xml: %s", err)
 	}
+
 	for _, ifaceData := range netconfReply.InterfaceInformation.PhysicalInterface {
 		ifaceDesc := getInterfaceDesc(ifaceDescrKeys, ifaceMetricKeys)
 		ifaceLabels := []string{strings.TrimSpace(ifaceData.Name.Text)}
@@ -291,6 +300,11 @@ func processIfaceNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metr
 			var allIfaceDescrKeys map[string]interface{}
 			if err := json.Unmarshal([]byte(logIface.Description.Text), &allIfaceDescrKeys); err != nil {
 				allIfaceDescrKeys = nil
+			}
+			if logIface.IfConfigFlags.IffUp == true {
+				ch <- prometheus.MustNewConstMetric(ifaceDesc["Up"], prometheus.GaugeValue, 1.0, logIfaceLabels...)
+			} else {
+				ch <- prometheus.MustNewConstMetric(ifaceDesc["Up"], prometheus.GaugeValue, 0.0, logIfaceLabels...)
 			}
 			if len(ifaceDescrKeys) > 0 {
 				ifaceDescrLabels := []string{strings.TrimSpace(logIface.Name.Text)}
@@ -586,6 +600,7 @@ type ifaceLogical struct {
 	Name              ifaceText             `xml:"name"`
 	Description       ifaceText             `xml:"description"`
 	TrafficStatistics ifaceInOutBytesPktsV6 `xml:"traffic-statistics"`
+	IfConfigFlags     ifaceConfigFlags      `xml:"if-config-flags"`
 	// LocalTrafficStatistics       ifaceInOutBytesPkts         `xml:"local-traffic-statistics"`
 	TransitTrafficStatistics     ifaceInOutBytesPktsBPSPPSV6 `xml:"transit-traffic-statistics"`
 	LAGTrafficStatistics         ifaceLAGTrafficStats        `xml:"lag-traffic-statistics"`
@@ -632,6 +647,10 @@ type ifaceSecInFlow struct {
 	FlowInputConnections      ifaceText `xml:"flow-input-connections"`
 }
 
+type BoolIfPresent bool
+type ifaceConfigFlags struct {
+	IffUp BoolIfPresent `xml:"iff-up"`
+}
 type ifaceLogicalLocalTrafficStats struct {
 	InputBytes    ifaceText `xml:"input-bytes"`
 	OutputBytes   ifaceText `xml:"output-bytes"`
