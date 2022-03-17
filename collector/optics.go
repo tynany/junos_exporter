@@ -208,9 +208,21 @@ func processOpticsNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Met
 			newGauge(ch, opticsDesc["LaneIndex"], lane.LaneIndex.Text, laneLabels...)
 			newGauge(ch, opticsDesc["LaserBiasCurrent"], lane.LaserBiasCurrent.Text, laneLabels...)
 			newGauge(ch, opticsDesc["LaserOutputPower"], lane.LaserOutputPower.Text, laneLabels...)
-			newGauge(ch, opticsDesc["LaserOutputPowerDbm"], lane.LaserOutputPowerDbm.Text, laneLabels...)
+
+			opticsLaneLaserNoLight := -40.0
+			if strings.TrimSpace(lane.LaserOutputPowerDbm.Text) == "- Inf" {
+				ch <- prometheus.MustNewConstMetric(opticsDesc["LaserOutputPowerDbm"], prometheus.GaugeValue, opticsLaneLaserNoLight, laneLabels...)
+			} else {
+				newGauge(ch, opticsDesc["LaserOutputPowerDbm"], lane.LaserOutputPowerDbm.Text, laneLabels...)
+			}
+
 			newGauge(ch, opticsDesc["LaserRxOpticalPower"], lane.LaserRxOpticalPower.Text, laneLabels...)
-			newGauge(ch, opticsDesc["LaserRxOpticalPowerDbm"], lane.LaserRxOpticalPowerDbm.Text, laneLabels...)
+
+			if strings.TrimSpace(lane.LaserRxOpticalPowerDbm.Text) == "- Inf" {
+				ch <- prometheus.MustNewConstMetric(opticsDesc["LaserRxOpticalPowerDbm"], prometheus.GaugeValue, opticsLaneLaserNoLight, laneLabels...)
+			} else {
+				newGauge(ch, opticsDesc["LaserRxOpticalPowerDbm"], lane.LaserRxOpticalPowerDbm.Text, laneLabels...)
+			}
 
 			opticLaneLaserBiasCurrentHighAlarm := 0.0
 			if lane.LaserBiasCurrentHighAlarm.Text == "off" {
