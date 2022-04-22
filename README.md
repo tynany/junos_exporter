@@ -102,6 +102,7 @@ The below metrics are currently implemented.
 - Power, from `show chassis power detail`.
 - Route Engine, from `show chassis routing-engine`.
 - IPsec, from `show security ipsec security-associations` and `show security ipsec inactive-tunnels`.
+- Optics, from `show interface diagnostics optics`
 
 ### BGP: junos_bgp_peer_types_up
 Junos Exporter exposes a special metric, `junos_bgp_peer_types_up`, that can be used in scenarios where you want to create Prometheus queries that report on the number of types of BGP peers that are currently established, such as for Alertmanager. To implement this metric, a JSON formatted description must be configured on your BGP group. Junos Exporter will then use the value from the keys specific under the `bgp_peer_type_keys` configuration, and aggregate all BGP peers that are currently established and configured with that type.
