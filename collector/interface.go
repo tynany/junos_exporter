@@ -152,6 +152,7 @@ func getInterfaceDesc(ifaceDescrKeys, ifaceMetricKeys []string) map[string]*prom
 		"FlowInputPolicyBytes":                     colPromDesc(ifaceSubsystem, "flow_input_policy_bytes", "Flow Input Policy Bytes.", ifacePhysicalLabels),
 		"FlowInputConnections":                     colPromDesc(ifaceSubsystem, "flow_input_connections", "Flow Input Connections.", ifacePhysicalLabels),
 		"SpeedBytes":                               colPromDesc(ifaceSubsystem, "speed_bytes", "Speed of the Interface in Bytes per Second", ifacePhysicalLabels),
+		"SnmpIndex":                                colPromDesc(ifaceSubsystem, "snmp_index", "SNMP Index for the interface", ifacePhysicalLabels),
 	}
 	if len(ifaceDescrKeys) > 0 {
 		ifaceDesc["InterfaceDescription"] = colPromDesc(ifaceSubsystem, "description", "Interface description keys", append([]string{"interface"}, ifaceDescrKeys...))
@@ -295,6 +296,7 @@ func processIfaceNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metr
 		newCounter(ch, ifaceDesc["AgedPackets"], ifaceData.OutputErrorList.AgedPackets.Text, ifaceLabels...)
 		newCounter(ch, ifaceDesc["HsLinkCrcErrors"], ifaceData.OutputErrorList.HsLinkCrcErrors.Text, ifaceLabels...)
 		newCounter(ch, ifaceDesc["OutputFifoErrors"], ifaceData.OutputErrorList.OutputFifoErrors.Text, ifaceLabels...)
+		newGauge(ch, ifaceDesc["SnmpIndex"], ifaceData.SnmpIndex.Text, ifaceLabels...)
 		for _, logIface := range ifaceData.LogicalInterfaces {
 			logIfaceLabels := []string{strings.TrimSpace(logIface.Name.Text)}
 			var allIfaceDescrKeys map[string]interface{}
@@ -368,6 +370,7 @@ func processIfaceNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metr
 			newCounter(ch, ifaceDesc["FlowInputConnections"], logIface.SecurityInputFlowStatistics.FlowInputConnections.Text, logIfaceLabels...)
 			newCounter(ch, ifaceDesc["FlowOutputMulticastPackets"], logIface.SecurityOutputFlowStatistics.FlowOutputMulticastPackets.Text, logIfaceLabels...)
 			newCounter(ch, ifaceDesc["FlowOutputPolicyBytes"], logIface.SecurityOutputFlowStatistics.FlowOutputPolicyBytes.Text, logIfaceLabels...)
+			newGauge(ch, ifaceDesc["SnmpIndex"], logIface.SnmpIndex.Text, logIfaceLabels...)
 		}
 		newCounter(ch, ifaceDesc["StpInputBytesDropped"], ifaceData.StpTrafficStatistics.StpInputBytesDropped.Text, ifaceLabels...)
 		newCounter(ch, ifaceDesc["StpOutputBytesDropped"], ifaceData.StpTrafficStatistics.StpOutputBytesDropped.Text, ifaceLabels...)
@@ -465,6 +468,7 @@ type ifacePhysical struct {
 	AdminStatus ifaceText `xml:"admin-status"`
 	OperStatus  ifaceText `xml:"oper-status"`
 	Description ifaceText `xml:"description"`
+	SnmpIndex   ifaceText `xml:"snmp-index"`
 	// Mtu         ifaceText `xml:"mtu"`
 	Speed ifaceText `xml:"speed"`
 	// LinkType    ifaceText `xml:"link-type"`
@@ -599,6 +603,7 @@ type ifaceSTPTrafficStats struct {
 type ifaceLogical struct {
 	Name              ifaceText             `xml:"name"`
 	Description       ifaceText             `xml:"description"`
+	SnmpIndex         ifaceText             `xml:"snmp-index"`
 	TrafficStatistics ifaceInOutBytesPktsV6 `xml:"traffic-statistics"`
 	IfConfigFlags     ifaceConfigFlags      `xml:"if-config-flags"`
 	// LocalTrafficStatistics       ifaceInOutBytesPkts         `xml:"local-traffic-statistics"`
