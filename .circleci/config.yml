@@ -1,10 +1,29 @@
-version: 2
+version: 2.1
+executors:
+  golang:
+    docker:
+      # Whenever the Go version is updated here, .promu.yml, Dockerfile and line 6 of this file should also be updated.
+      - image: circleci/golang:1.13
 jobs:
+  test:
+    working_directory: /go/src/github.com/tynany/junos_exporter
+    executor: golang
+    steps:
+      - checkout
+      - run: make test
+  build:
+    working_directory: /go/src/github.com/tynany/junos_exporter
+    executor: golang
+    steps:
+      - checkout
+      - setup_remote_docker
+      - run: make setup_promu
+      - run: ./promu crossbuild
+      - run: ./promu crossbuild tarballs
+      - run: ./promu checksum .tarballs
   release:
     working_directory: /go/src/github.com/tynany/junos_exporter
-    docker:
-      # Whenever the Go version is updated here, .promu.yml should also be updated.
-      - image: circleci/golang:1.13
+    executor: golang
     steps:
       - checkout
       - setup_remote_docker
@@ -15,8 +34,10 @@ jobs:
       - run: ./promu release .tarballs
 workflows:
   version: 2
-  release:
+  build_and_release:
     jobs:
+      - test
+      - build
       - release:
           filters:
             branches:

@@ -8,4 +8,4 @@ build:
 	./promu build --prefix $(PREFIX) $(PROMU_BINARIES)
 
 test:
-	go test
+	go test ./...
