@@ -244,6 +244,17 @@ func processIfaceNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metr
 		}
 
 		var allIfaceDescrKeys map[string]interface{}
+
+		// Junos OS Evolved produces a different representation of a JSON string in the description field.
+		// Junos OS Evolved XML output: <description>{\&quot;r_name\&quot;:\&quot;my-far-end-device\&quot;}</description>
+		//      XML decoding results in the string: {\\\"r_name\\\":\\\"my-far-end-device\\\"}
+		//
+		// Junos (regular) XML output: <description>{"r_name":"my-far-end-device"}</description>
+		//      XML decoding results in the string: {\"r_name\":\"my-far-end-device\"}
+		//
+		// This line of code sanitizes the output for the Junos OS Evolved XML response format
+		ifaceData.Description.Text = strings.ReplaceAll(ifaceData.Description.Text, "\\\"", "\"")
+
 		if err := json.Unmarshal([]byte(ifaceData.Description.Text), &allIfaceDescrKeys); err != nil {
 			allIfaceDescrKeys = nil
 		}
