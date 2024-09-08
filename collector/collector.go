@@ -24,7 +24,6 @@ var (
 		"ScrapeErrTotal": promDesc("scrape_errors_total", "Total number of errors from a collector.", junosLabels),
 		"ScrapeDuration": promDesc("scrape_duration_seconds", "Time it took for a collector's scrape to complete.", junosLabels),
 		"CollectorUp":    promDesc("collector_up", "Whether the collector's last scrape was successful (1 = successful, 0 = unsuccessful).", junosLabels),
-		"Up":             promDesc("up", "Whether the Junos collector is currently up.", nil),
 	}
 )
 
