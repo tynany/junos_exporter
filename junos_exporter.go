@@ -2,8 +2,8 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -112,7 +112,10 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	registry.Register(ne)
+	if err := registry.Register(ne); err != nil {
+		log.Errorf("could not register exporter: %s", err)
+		return
+	}
 
 	gatherers := prometheus.Gatherers{
 		prometheus.DefaultGatherer,
@@ -138,7 +141,7 @@ func generateSSHConfig() error {
 			User: configData.Username,
 		}
 		if configData.SSHKey != "" {
-			buf, err := ioutil.ReadFile(configData.SSHKey)
+			buf, err := os.ReadFile(configData.SSHKey)
 			if err != nil {
 				return fmt.Errorf("could not open ssh key %q: %s", configData.SSHKey, err)
 			}
@@ -168,16 +171,12 @@ func getInterfaceDescriptionKeys() {
 	var globalIfaceDesc []string
 	if len(interfaceDescriptionKeys) == 0 {
 		if len(collectorConfig.Global.InterfaceDescKeys) > 0 {
-			for _, descrKey := range collectorConfig.Global.InterfaceDescKeys {
-				globalIfaceDesc = append(globalIfaceDesc, descrKey)
-			}
+			globalIfaceDesc = append(globalIfaceDesc, collectorConfig.Global.InterfaceDescKeys...)
 		}
 	}
 	for name, configData := range collectorConfig.Config {
 		if len(configData.InterfaceDescKeys) > 0 {
-			for _, descrKey := range configData.InterfaceDescKeys {
-				interfaceDescriptionKeys[name] = append(interfaceDescriptionKeys[name], descrKey)
-			}
+			interfaceDescriptionKeys[name] = append(interfaceDescriptionKeys[name], configData.InterfaceDescKeys...)
 		} else {
 			interfaceDescriptionKeys[name] = globalIfaceDesc
 		}
@@ -188,16 +187,12 @@ func getInterfaceMetricKeys() {
 	var globalIfaceMetrics []string
 	if len(interfaceMetricKeys) == 0 {
 		if len(collectorConfig.Global.InterfaceMetricKeys) > 0 {
-			for _, descrKey := range collectorConfig.Global.InterfaceMetricKeys {
-				globalIfaceMetrics = append(globalIfaceMetrics, descrKey)
-			}
+			globalIfaceMetrics = append(globalIfaceMetrics, collectorConfig.Global.InterfaceMetricKeys...)
 		}
 	}
 	for name, configData := range collectorConfig.Config {
 		if len(configData.InterfaceMetricKeys) > 0 {
-			for _, metricKey := range configData.InterfaceMetricKeys {
-				interfaceMetricKeys[name] = append(interfaceMetricKeys[name], metricKey)
-			}
+			interfaceMetricKeys[name] = append(interfaceMetricKeys[name], configData.InterfaceMetricKeys...)
 		} else {
 			interfaceMetricKeys[name] = globalIfaceMetrics
 		}
@@ -208,16 +203,12 @@ func getBGPTypeKeys() {
 	var globalBGPTypeKeys []string
 	if len(bgpTypeKeys) == 0 {
 		if len(collectorConfig.Global.BGPTypeKeys) > 0 {
-			for _, descrKey := range collectorConfig.Global.BGPTypeKeys {
-				globalBGPTypeKeys = append(globalBGPTypeKeys, descrKey)
-			}
+			globalBGPTypeKeys = append(globalBGPTypeKeys, collectorConfig.Global.BGPTypeKeys...)
 		}
 	}
 	for name, configData := range collectorConfig.Config {
 		if len(configData.BGPTypeKeys) > 0 {
-			for _, metricKey := range configData.BGPTypeKeys {
-				bgpTypeKeys[name] = append(bgpTypeKeys[name], metricKey)
-			}
+			bgpTypeKeys[name] = append(bgpTypeKeys[name], configData.BGPTypeKeys...)
 		} else {
 			bgpTypeKeys[name] = globalBGPTypeKeys
 		}

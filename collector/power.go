@@ -188,6 +188,7 @@ type powerText struct {
 	Text string `xml:",chardata"`
 }
 
-type powerTemp struct {
-	Temp string `xml:"celsius,attr"`
-}
+// Leaving the below as it may be implemented in the future
+// type powerTemp struct {
+// 	Temp string `xml:"celsius,attr"`
+// }

@@ -158,7 +158,7 @@ func getInterfaceDesc(ifaceDescrKeys, ifaceMetricKeys []string) map[string]*prom
 		ifaceDesc["InterfaceDescription"] = colPromDesc(ifaceSubsystem, "description", "Interface description keys", append([]string{"interface"}, ifaceDescrKeys...))
 	}
 	for _, metricKey := range ifaceMetricKeys {
-		ifaceDesc[metricKey] = colPromDesc(ifaceSubsystem, strings.ToLower(metricKey), "User-defined Metric from Description Key", append([]string{"interface"}))
+		ifaceDesc[metricKey] = colPromDesc(ifaceSubsystem, strings.ToLower(metricKey), "User-defined Metric from Description Key", []string{"interface"})
 	}
 	return ifaceDesc
 }
@@ -203,7 +203,9 @@ func (c *InterfaceCollector) Get(ch chan<- prometheus.Metric, conf Config) ([]er
 
 func (c *BoolIfPresent) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
 	var v string
-	d.DecodeElement(&v, &start)
+	if err := d.DecodeElement(&v, &start); err != nil {
+		return err
+	}
 	*c = true
 	return nil
 }
@@ -314,7 +316,7 @@ func processIfaceNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metr
 			if err := json.Unmarshal([]byte(logIface.Description.Text), &allIfaceDescrKeys); err != nil {
 				allIfaceDescrKeys = nil
 			}
-			if logIface.IfConfigFlags.IffUp == true {
+			if logIface.IfConfigFlags.IffUp {
 				ch <- prometheus.MustNewConstMetric(ifaceDesc["Up"], prometheus.GaugeValue, 1.0, logIfaceLabels...)
 			} else {
 				ch <- prometheus.MustNewConstMetric(ifaceDesc["Up"], prometheus.GaugeValue, 0.0, logIfaceLabels...)
@@ -667,12 +669,14 @@ type BoolIfPresent bool
 type ifaceConfigFlags struct {
 	IffUp BoolIfPresent `xml:"iff-up"`
 }
-type ifaceLogicalLocalTrafficStats struct {
-	InputBytes    ifaceText `xml:"input-bytes"`
-	OutputBytes   ifaceText `xml:"output-bytes"`
-	InputPackets  ifaceText `xml:"input-packets"`
-	OutputPackets ifaceText `xml:"output-packets"`
-}
+
+// Leaving the below as it may be implemented in the future
+// type ifaceLogicalLocalTrafficStats struct {
+// 	InputBytes    ifaceText `xml:"input-bytes"`
+// 	OutputBytes   ifaceText `xml:"output-bytes"`
+// 	InputPackets  ifaceText `xml:"input-packets"`
+// 	OutputPackets ifaceText `xml:"output-packets"`
+// }
 
 type ifaceInOutBytesPkts struct {
 	InputBytes    ifaceText `xml:"input-bytes"`
@@ -689,16 +693,17 @@ type ifaceInOutBytesPktsV6 struct {
 	Ipv6TransitStatistics ifaceInOutBytesPkts `xml:"ipv6-transit-statistics"`
 }
 
-type ifaceInOutBytesPktsBPSPPS struct {
-	InputBytes    ifaceText `xml:"input-bytes"`
-	OutputBytes   ifaceText `xml:"output-bytes"`
-	InputPackets  ifaceText `xml:"input-packets"`
-	OutputPackets ifaceText `xml:"output-packets"`
-	InputBps      ifaceText `xml:"input-bps"`
-	OutputBps     ifaceText `xml:"output-bps"`
-	InputPps      ifaceText `xml:"input-pps"`
-	OutputPps     ifaceText `xml:"output-pps"`
-}
+// Leaving the below as it may be implemented in the future
+// type ifaceInOutBytesPktsBPSPPS struct {
+// 	InputBytes    ifaceText `xml:"input-bytes"`
+// 	OutputBytes   ifaceText `xml:"output-bytes"`
+// 	InputPackets  ifaceText `xml:"input-packets"`
+// 	OutputPackets ifaceText `xml:"output-packets"`
+// 	InputBps      ifaceText `xml:"input-bps"`
+// 	OutputBps     ifaceText `xml:"output-bps"`
+// 	InputPps      ifaceText `xml:"input-pps"`
+// 	OutputPps     ifaceText `xml:"output-pps"`
+// }
 
 type ifaceInOutBytesPktsBPSPPSV6 struct {
 	InputBytes            ifaceText           `xml:"input-bytes"`
@@ -712,13 +717,14 @@ type ifaceInOutBytesPktsBPSPPSV6 struct {
 	Ipv6TransitStatistics ifaceInOutBytesPkts `xml:"ipv6-transit-statistics"`
 }
 
-type ifaceLogicalTrafficStats struct {
-	InputBytes            ifaceText           `xml:"input-bytes"`
-	OutputBytes           ifaceText           `xml:"output-bytes"`
-	InputPackets          ifaceText           `xml:"input-packets"`
-	OutputPackets         ifaceText           `xml:"output-packets"`
-	Ipv6TransitStatistics ifaceInOutBytesPkts `xml:"ipv6-transit-statistics"`
-}
+// Leaving the below as it may be implemented in the future
+// type ifaceLogicalTrafficStats struct {
+// 	InputBytes            ifaceText           `xml:"input-bytes"`
+// 	OutputBytes           ifaceText           `xml:"output-bytes"`
+// 	InputPackets          ifaceText           `xml:"input-packets"`
+// 	OutputPackets         ifaceText           `xml:"output-packets"`
+// 	Ipv6TransitStatistics ifaceInOutBytesPkts `xml:"ipv6-transit-statistics"`
+// }
 
 type ifaceLAGTrafficStats struct {
 	LagBundle ifaceInOutBytesPktsBPSPPSV6 `xml:"lag-bundle"`
@@ -749,24 +755,28 @@ type ifaceInputErrorList struct {
 	InputL2MismatchTimeouts ifaceText `xml:"input-l2-mismatch-timeouts"`
 	InputFifoErrors         ifaceText `xml:"input-fifo-errors"`
 }
-type ifaceTrafficStats struct {
-	InputBytes            ifaceText             `xml:"input-bytes"`
-	OutputBytes           ifaceText             `xml:"output-bytes"`
-	InputPackets          ifaceText             `xml:"input-packets"`
-	OutputPackets         ifaceText             `xml:"output-packets"`
-	InputBps              ifaceText             `xml:"input-bps"`
-	OutputBps             ifaceText             `xml:"output-bps"`
-	InputPps              ifaceText             `xml:"input-pps"`
-	OutputPps             ifaceText             `xml:"output-pps"`
-	Ipv6TransitStatistics ifaceIPv6TransitStats `xml:"ipv6-transit-statistics"`
-}
 
-type ifaceIPv6TransitStats struct {
-	InputBytes    ifaceText `xml:"input-bytes"`
-	OutputBytes   ifaceText `xml:"output-bytes"`
-	InputPackets  ifaceText `xml:"input-packets"`
-	OutputPackets ifaceText `xml:"output-packets"`
-}
+// Leaving the below as it may be implemented in the future
+
+// type ifaceTrafficStats struct {
+// 	InputBytes            ifaceText             `xml:"input-bytes"`
+// 	OutputBytes           ifaceText             `xml:"output-bytes"`
+// 	InputPackets          ifaceText             `xml:"input-packets"`
+// 	OutputPackets         ifaceText             `xml:"output-packets"`
+// 	InputBps              ifaceText             `xml:"input-bps"`
+// 	OutputBps             ifaceText             `xml:"output-bps"`
+// 	InputPps              ifaceText             `xml:"input-pps"`
+// 	OutputPps             ifaceText             `xml:"output-pps"`
+// 	Ipv6TransitStatistics ifaceIPv6TransitStats `xml:"ipv6-transit-statistics"`
+// }
+
+// Leaving the below as it may be implemented in the future
+// type ifaceIPv6TransitStats struct {
+// 	InputBytes    ifaceText `xml:"input-bytes"`
+// 	OutputBytes   ifaceText `xml:"output-bytes"`
+// 	InputPackets  ifaceText `xml:"input-packets"`
+// 	OutputPackets ifaceText `xml:"output-packets"`
+// }
 
 type ifaceText struct {
 	Text string `xml:",chardata"`
