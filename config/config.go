@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 
 	"golang.org/x/crypto/ssh"
@@ -73,7 +72,7 @@ func parseConfig(configuration *Configuration, validCollectors []string) error {
 		}
 
 		if configData.SSHKey != "" {
-			buf, err := ioutil.ReadFile(configData.SSHKey)
+			buf, err := os.ReadFile(configData.SSHKey)
 			if err != nil {
 				return fmt.Errorf("could not open ssh_key %q in %q configuration: %v", configData.SSHKey, name, err)
 			}
