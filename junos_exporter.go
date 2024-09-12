@@ -44,6 +44,7 @@ func initCollectors() {
 	collectors = append(collectors, collector.NewIpsecCollector())
 	collectors = append(collectors, collector.NewOpticsCollector())
 	collectors = append(collectors, collector.NewOSPFCollector())
+	collectors = append(collectors, collector.NewFPCCollector())
 }
 
 func validateRequest(configParam string, targetParam string) error {
