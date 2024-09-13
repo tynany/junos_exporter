@@ -44,6 +44,11 @@ configs:
       - interface
       - environment
       - power
+      - route_engine
+      - fpc
+      - ospf
+      - optics
+      - ipsec
     interface_description_keys:   # List of JSON keys in the interface description to include as labels in the 'interface_description' metric. Optional.
       - 
     interface_metric_keys:        # List of JSON keys in the interface description to create static metrics from. Optional.
@@ -104,6 +109,7 @@ The below metrics are currently implemented.
 - IPsec, from `show security ipsec security-associations` and `show security ipsec inactive-tunnels`.
 - Optics, from `show interface diagnostics optics`
 - OSPF, from `show ospf neighbor`
+- FPC, from `show chassis fpc`
 
 ### BGP: junos_bgp_peer_types_up
 Junos Exporter exposes a special metric, `junos_bgp_peer_types_up`, that can be used in scenarios where you want to create Prometheus queries that report on the number of types of BGP peers that are currently established, such as for Alertmanager. To implement this metric, a JSON formatted description must be configured on your BGP group. Junos Exporter will then use the value from the keys specific under the `bgp_peer_type_keys` configuration, and aggregate all BGP peers that are currently established and configured with that type.
