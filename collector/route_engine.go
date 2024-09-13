@@ -12,9 +12,13 @@ import (
 var (
 	reSubsystem = "route_engine"
 
-	reLabels    = []string{"slot"}
-	reCPULabels = append(reLabels, "timespan")
-	reDesc      = map[string]*prometheus.Desc{
+	totalREErrors = 0.0
+)
+
+func createREDesc(reLabels []string) map[string]*prometheus.Desc {
+	reCPULabels := append(reLabels, "timespan")
+
+	return map[string]*prometheus.Desc{
 		"state":         colPromDesc(reSubsystem, "state", "RE state (1 = OK, 0 = Not OK).", reLabels),
 		"temp":          colPromDesc(reSubsystem, "temperature_celsius", "Route engine temperature in degrees celsius.", reLabels),
 		"cpuTemp":       colPromDesc(reSubsystem, "cpu_temperature_celsius", "Route engine CPU temperature in degrees celsius.", reLabels),
@@ -33,9 +37,15 @@ var (
 		"masterState":   colPromDesc(reSubsystem, "mastership_state", "Mastership state (1 = Master, 0 = Backup).", reLabels),
 		"masterPrio":    colPromDesc(reSubsystem, "mastership_priority", "Mastership priority (1 = Master, 0 = Backup).", reLabels),
 	}
+}
+func getREDesc() (map[string]*prometheus.Desc, map[string]*prometheus.Desc) {
+	labels := []string{"slot"}
+	multiRELabels := append(labels, "name")
+	desc := createREDesc(labels)
+	multiREDesc := createREDesc(multiRELabels)
+	return desc, multiREDesc
 
-	totalREErrors = 0.0
-)
+}
 
 // RECollector collects route engine metrics, implemented as per the Collector interface.
 type RECollector struct{}
@@ -77,88 +87,115 @@ func (c *RECollector) Get(ch chan<- prometheus.Metric, conf Config) ([]error, fl
 
 func processRENetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric) error {
 	var netconfReply reRPCReply
+	reDesc, multiREDesc := getREDesc()
 
 	if err := xml.Unmarshal([]byte(reply.RawReply), &netconfReply); err != nil {
 		return fmt.Errorf("could not unmarshal netconf reply xml: %s", err)
 	}
 
+	// Metrics for multiple route engine instances (i.e. clusters)
+	if len(netconfReply.MultiREResults.MultiREItem) != 0 {
+		for _, re := range netconfReply.MultiREResults.MultiREItem {
+			for _, reData := range re.REInformation.REEntry {
+				labels := []string{"singleRE"}
+				if reData.Slot.Text != "" {
+					labels = []string{reData.Slot.Text}
+				}
+				labels = append(labels, re.REName)
+				sendREMetrics(ch, multiREDesc, labels, reData)
+			}
+		}
+		return nil
+	}
+
+	// Metrics for single route engine instances
 	for _, reData := range netconfReply.REInformation.REEntry {
-		var labels []string
+		labels := []string{"singleRE"}
 		if reData.Slot.Text != "" {
-			labels = append(labels, reData.Slot.Text)
-		} else {
-			labels = append(labels, "singleRE")
+			labels = []string{reData.Slot.Text}
 		}
-
-		state := 0.0
-		if strings.ToLower(reData.Status.Text) == "ok" {
-			state = 1.0
-		}
-		ch <- prometheus.MustNewConstMetric(reDesc["state"], prometheus.GaugeValue, state, labels...)
-
-		newGauge(ch, reDesc["temp"], reData.Temperature.Temp, labels...)
-		newGauge(ch, reDesc["cpuTemp"], reData.CPUTemperature.Temp, labels...)
-		newGauge(ch, reDesc["uptime"], reData.UpTime.Seconds, labels...)
-
-		newGaugeMB(ch, reDesc["memTotal"], reData.MemorySystemTotal.Text, labels...)
-		newGaugeMB(ch, reDesc["memUsed"], reData.MemorySystemTotalUsed.Text, labels...)
-		newGauge(ch, reDesc["memBuf"], reData.MemoryBufferUtilization.Text, labels...)
-		newGaugeMB(ch, reDesc["memDRAM"], reData.MemoryDRAMSize.Text, labels...)
-		newGaugeMB(ch, reDesc["memInstalled"], reData.MemoryInstalledSize.Text, labels...)
-
-		label5s := append(labels, "5s")
-		newGauge(ch, reDesc["cpuUser"], reData.CPUUser.Text, label5s...)
-		newGauge(ch, reDesc["cpuBackground"], reData.CPUBackground.Text, label5s...)
-		newGauge(ch, reDesc["cpuSystem"], reData.CPUSystem.Text, label5s...)
-		newGauge(ch, reDesc["cpuInterrupt"], reData.CPUInterrupt.Text, label5s...)
-		newGauge(ch, reDesc["cpuIdle"], reData.CPUIdle.Text, label5s...)
-
-		label1m := append(labels, "1m")
-		newGauge(ch, reDesc["cpuUser"], reData.CPUUser1.Text, label1m...)
-		newGauge(ch, reDesc["cpuBackground"], reData.CPUBackground1.Text, label1m...)
-		newGauge(ch, reDesc["cpuSystem"], reData.CPUSystem1.Text, label1m...)
-		newGauge(ch, reDesc["cpuInterrupt"], reData.CPUInterrupt1.Text, label1m...)
-		newGauge(ch, reDesc["cpuIdle"], reData.CPUIdle1.Text, label1m...)
-		newGauge(ch, reDesc["loadAvg"], reData.LoadAverageOne.Text, label1m...)
-
-		label5m := append(labels, "5m")
-		newGauge(ch, reDesc["cpuUser"], reData.CPUUser2.Text, label5m...)
-		newGauge(ch, reDesc["cpuBackground"], reData.CPUBackground2.Text, label5m...)
-		newGauge(ch, reDesc["cpuSystem"], reData.CPUSystem2.Text, label5m...)
-		newGauge(ch, reDesc["cpuInterrupt"], reData.CPUInterrupt2.Text, label5m...)
-		newGauge(ch, reDesc["cpuIdle"], reData.CPUIdle2.Text, label5m...)
-		newGauge(ch, reDesc["loadAvg"], reData.LoadAverageFive.Text, label5m...)
-
-		label15m := append(labels, "15m")
-		newGauge(ch, reDesc["cpuUser"], reData.CPUUser3.Text, label15m...)
-		newGauge(ch, reDesc["cpuBackground"], reData.CPUBackground3.Text, label15m...)
-		newGauge(ch, reDesc["cpuSystem"], reData.CPUSystem3.Text, label15m...)
-		newGauge(ch, reDesc["cpuInterrupt"], reData.CPUInterrupt3.Text, label15m...)
-		newGauge(ch, reDesc["cpuIdle"], reData.CPUIdle3.Text, label15m...)
-		newGauge(ch, reDesc["loadAvg"], reData.LoadAverageFifteen.Text, label15m...)
-
-		mState := 0.0
-		if strings.ToLower(reData.MastershipState.Text) == "master" {
-			mState = 1.0
-		}
-		ch <- prometheus.MustNewConstMetric(reDesc["masterState"], prometheus.GaugeValue, mState, labels...)
-
-		mPri := 0.0
-		if strings.Contains(strings.ToLower(reData.MastershipState.Text), "master") {
-			mPri = 1.0
-		}
-		ch <- prometheus.MustNewConstMetric(reDesc["masterPrio"], prometheus.GaugeValue, mPri, labels...)
-
+		sendREMetrics(ch, reDesc, labels, reData)
 	}
 	return nil
 }
 
+func sendREMetrics(ch chan<- prometheus.Metric, reDesc map[string]*prometheus.Desc, labels []string, reData reEntry) {
+
+	state := 0.0
+	if strings.ToLower(reData.Status.Text) == "ok" {
+		state = 1.0
+	}
+	ch <- prometheus.MustNewConstMetric(reDesc["state"], prometheus.GaugeValue, state, labels...)
+
+	newGauge(ch, reDesc["temp"], reData.Temperature.Temp, labels...)
+	newGauge(ch, reDesc["cpuTemp"], reData.CPUTemperature.Temp, labels...)
+	newGauge(ch, reDesc["uptime"], reData.UpTime.Seconds, labels...)
+
+	newGaugeMB(ch, reDesc["memTotal"], reData.MemorySystemTotal.Text, labels...)
+	newGaugeMB(ch, reDesc["memUsed"], reData.MemorySystemTotalUsed.Text, labels...)
+	newGauge(ch, reDesc["memBuf"], reData.MemoryBufferUtilization.Text, labels...)
+	newGaugeMB(ch, reDesc["memDRAM"], reData.MemoryDRAMSize.Text, labels...)
+	newGaugeMB(ch, reDesc["memInstalled"], reData.MemoryInstalledSize.Text, labels...)
+
+	label5s := append(labels, "5s")
+	newGauge(ch, reDesc["cpuUser"], reData.CPUUser.Text, label5s...)
+	newGauge(ch, reDesc["cpuBackground"], reData.CPUBackground.Text, label5s...)
+	newGauge(ch, reDesc["cpuSystem"], reData.CPUSystem.Text, label5s...)
+	newGauge(ch, reDesc["cpuInterrupt"], reData.CPUInterrupt.Text, label5s...)
+	newGauge(ch, reDesc["cpuIdle"], reData.CPUIdle.Text, label5s...)
+
+	label1m := append(labels, "1m")
+	newGauge(ch, reDesc["cpuUser"], reData.CPUUser1.Text, label1m...)
+	newGauge(ch, reDesc["cpuBackground"], reData.CPUBackground1.Text, label1m...)
+	newGauge(ch, reDesc["cpuSystem"], reData.CPUSystem1.Text, label1m...)
+	newGauge(ch, reDesc["cpuInterrupt"], reData.CPUInterrupt1.Text, label1m...)
+	newGauge(ch, reDesc["cpuIdle"], reData.CPUIdle1.Text, label1m...)
+	newGauge(ch, reDesc["loadAvg"], reData.LoadAverageOne.Text, label1m...)
+
+	label5m := append(labels, "5m")
+	newGauge(ch, reDesc["cpuUser"], reData.CPUUser2.Text, label5m...)
+	newGauge(ch, reDesc["cpuBackground"], reData.CPUBackground2.Text, label5m...)
+	newGauge(ch, reDesc["cpuSystem"], reData.CPUSystem2.Text, label5m...)
+	newGauge(ch, reDesc["cpuInterrupt"], reData.CPUInterrupt2.Text, label5m...)
+	newGauge(ch, reDesc["cpuIdle"], reData.CPUIdle2.Text, label5m...)
+	newGauge(ch, reDesc["loadAvg"], reData.LoadAverageFive.Text, label5m...)
+
+	label15m := append(labels, "15m")
+	newGauge(ch, reDesc["cpuUser"], reData.CPUUser3.Text, label15m...)
+	newGauge(ch, reDesc["cpuBackground"], reData.CPUBackground3.Text, label15m...)
+	newGauge(ch, reDesc["cpuSystem"], reData.CPUSystem3.Text, label15m...)
+	newGauge(ch, reDesc["cpuInterrupt"], reData.CPUInterrupt3.Text, label15m...)
+	newGauge(ch, reDesc["cpuIdle"], reData.CPUIdle3.Text, label15m...)
+	newGauge(ch, reDesc["loadAvg"], reData.LoadAverageFifteen.Text, label15m...)
+
+	mState := 0.0
+	if strings.ToLower(reData.MastershipState.Text) == "master" {
+		mState = 1.0
+	}
+	ch <- prometheus.MustNewConstMetric(reDesc["masterState"], prometheus.GaugeValue, mState, labels...)
+
+	mPri := 0.0
+	if strings.Contains(strings.ToLower(reData.MastershipState.Text), "master") {
+		mPri = 1.0
+	}
+	ch <- prometheus.MustNewConstMetric(reDesc["masterPrio"], prometheus.GaugeValue, mPri, labels...)
+
+}
+
 type reRPCReply struct {
-	REInformation reInformation `xml:"route-engine-information"`
+	REInformation  reInformation  `xml:"route-engine-information"`
+	MultiREResults multiREResults `xml:"multi-routing-engine-results"`
 }
 
 type reInformation struct {
 	REEntry []reEntry `xml:"route-engine"`
+}
+type multiREResults struct {
+	MultiREItem []multiREItem `xml:"multi-routing-engine-item"`
+}
+type multiREItem struct {
+	REName        string        `xml:"re-name"`
+	REInformation reInformation `xml:"route-engine-information"`
 }
 
 type reEntry struct {
