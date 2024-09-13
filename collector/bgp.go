@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Juniper/go-netconf/netconf"
+	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -55,11 +56,13 @@ var (
 )
 
 // BGPCollector collects BGP metrics, implemented as per the Collector interface.
-type BGPCollector struct{}
+type BGPCollector struct {
+	logger log.Logger
+}
 
 // NewBGPCollector returns a new BGPCollector
-func NewBGPCollector() *BGPCollector {
-	return &BGPCollector{}
+func NewBGPCollector(logger log.Logger) *BGPCollector {
+	return &BGPCollector{logger: logger}
 }
 
 // Name of the collector.
@@ -138,12 +141,13 @@ func (c *BGPCollector) Get(ch chan<- prometheus.Metric, conf Config) ([]error, f
 		bgpPeerInterfaces,
 		routeInstances,
 		routeInstanceNames,
+		c.logger,
 	); err != nil {
 		totalBGPErrors++
 		errors = append(errors, err)
 	}
 
-	if err := processBGPNeighborNetconfReply(replyNeighbor, ch); err != nil {
+	if err := processBGPNeighborNetconfReply(replyNeighbor, ch, c.logger); err != nil {
 		totalBGPErrors++
 		errors = append(errors, err)
 	}
@@ -186,7 +190,7 @@ func getBgpPeerInterface(reply *netconf.RPCReply) (map[string]string, error) {
 	return peerToInterface, nil
 }
 
-func processBGPNeighborNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric) error {
+func processBGPNeighborNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric, logger log.Logger) error {
 	var netconfReply bgpNeighborRPCReply
 	if err := xml.Unmarshal([]byte(reply.RawReply), &netconfReply); err != nil {
 		return fmt.Errorf("could not unmarshal netconf reply xml: %s", err)
@@ -214,7 +218,7 @@ func processBGPNeighborNetconfReply(reply *netconf.RPCReply, ch chan<- prometheu
 				strings.TrimSpace(peerData.PeerCfgRti.Text),
 				strings.TrimSpace(peerData.NlriTypePeer),
 			}
-			newGauge(ch, bgpDesc["PeerRIBAdvertisedPrefixCount"], peerData.BGPRIB.AdvertisedPrefixCount, peerLabels...)
+			newGauge(logger, ch, bgpDesc["PeerRIBAdvertisedPrefixCount"], peerData.BGPRIB.AdvertisedPrefixCount, peerLabels...)
 		}
 	}
 	return nil
@@ -229,6 +233,7 @@ func processBGPNetconfReply(
 	bgpPeerInterfaces map[string]string,
 	routeInstances map[string]string,
 	routeInstanceNames map[string]string,
+	logger log.Logger,
 ) error {
 
 	var netconfReply bgpNeighborRPCReply
@@ -250,27 +255,27 @@ func processBGPNetconfReply(
 			return fmt.Errorf("could not unmarshal netconf reply xml: %s", err)
 		}
 		ribLabels := []string{routeInstanceBGP}
-		newGauge(ch, bgpDesc["GroupCount"], netconfReplyInstance.BgpInformation.GroupCount, ribLabels...)
-		newGauge(ch, bgpDesc["PeerCount"], netconfReplyInstance.BgpInformation.PeerCount, ribLabels...)
-		newGauge(ch, bgpDesc["DownPeerCount"], netconfReplyInstance.BgpInformation.DownPeerCount, ribLabels...)
+		newGauge(logger, ch, bgpDesc["GroupCount"], netconfReplyInstance.BgpInformation.GroupCount, ribLabels...)
+		newGauge(logger, ch, bgpDesc["PeerCount"], netconfReplyInstance.BgpInformation.PeerCount, ribLabels...)
+		newGauge(logger, ch, bgpDesc["DownPeerCount"], netconfReplyInstance.BgpInformation.DownPeerCount, ribLabels...)
 		for routeInstance := range routeInstances {
 			if routeInstanceBGP == routeInstances[routeInstance] {
 				for _, ribData := range netconfReplyInstance.BgpInformation.BgpRib {
 					if ribData.Name == routeInstance {
 						if val, ok := routeInstanceCheck[routeInstanceBGP]; !ok {
 							routeInstanceCheck[routeInstanceBGP] = val
-							newGauge(ch, bgpDesc["RIBTotalPrefixCount"], ribData.TotalPrefixCount, ribLabels...)
-							newGauge(ch, bgpDesc["RIBHistoryPrefixCount"], ribData.HistoryPrefixCount, ribLabels...)
-							newGauge(ch, bgpDesc["RIBDampedPrefixCount"], ribData.DampedPrefixCount, ribLabels...)
-							newGauge(ch, bgpDesc["RIBTotalExternalPrefixCount"], ribData.TotalExternalPrefixCount, ribLabels...)
-							newGauge(ch, bgpDesc["RIBActiveExternalPrefixCount"], ribData.ActiveExternalPrefixCount, ribLabels...)
-							newGauge(ch, bgpDesc["RIBAcceptedExternalPrefixCount"], ribData.AcceptedExternalPrefixCount, ribLabels...)
-							newGauge(ch, bgpDesc["RIBSuppressedExternalPrefixCount"], ribData.SuppressedExternalPrefixCount, ribLabels...)
-							newGauge(ch, bgpDesc["RIBTotalInternalPrefixCount"], ribData.TotalInternalPrefixCount, ribLabels...)
-							newGauge(ch, bgpDesc["RIBActiveInternalPrefixCount"], ribData.ActiveInternalPrefixCount, ribLabels...)
-							newGauge(ch, bgpDesc["RIBAcceptedInternalPrefixCount"], ribData.AcceptedInternalPrefixCount, ribLabels...)
-							newGauge(ch, bgpDesc["RIBSuppressedInternalPrefixCount"], ribData.SuppressedInternalPrefixCount, ribLabels...)
-							newGauge(ch, bgpDesc["RIBPendingPrefixCount"], ribData.PendingPrefixCount, ribLabels...)
+							newGauge(logger, ch, bgpDesc["RIBTotalPrefixCount"], ribData.TotalPrefixCount, ribLabels...)
+							newGauge(logger, ch, bgpDesc["RIBHistoryPrefixCount"], ribData.HistoryPrefixCount, ribLabels...)
+							newGauge(logger, ch, bgpDesc["RIBDampedPrefixCount"], ribData.DampedPrefixCount, ribLabels...)
+							newGauge(logger, ch, bgpDesc["RIBTotalExternalPrefixCount"], ribData.TotalExternalPrefixCount, ribLabels...)
+							newGauge(logger, ch, bgpDesc["RIBActiveExternalPrefixCount"], ribData.ActiveExternalPrefixCount, ribLabels...)
+							newGauge(logger, ch, bgpDesc["RIBAcceptedExternalPrefixCount"], ribData.AcceptedExternalPrefixCount, ribLabels...)
+							newGauge(logger, ch, bgpDesc["RIBSuppressedExternalPrefixCount"], ribData.SuppressedExternalPrefixCount, ribLabels...)
+							newGauge(logger, ch, bgpDesc["RIBTotalInternalPrefixCount"], ribData.TotalInternalPrefixCount, ribLabels...)
+							newGauge(logger, ch, bgpDesc["RIBActiveInternalPrefixCount"], ribData.ActiveInternalPrefixCount, ribLabels...)
+							newGauge(logger, ch, bgpDesc["RIBAcceptedInternalPrefixCount"], ribData.AcceptedInternalPrefixCount, ribLabels...)
+							newGauge(logger, ch, bgpDesc["RIBSuppressedInternalPrefixCount"], ribData.SuppressedInternalPrefixCount, ribLabels...)
+							newGauge(logger, ch, bgpDesc["RIBPendingPrefixCount"], ribData.PendingPrefixCount, ribLabels...)
 						}
 					}
 				}
@@ -327,15 +332,15 @@ func processBGPNetconfReply(
 			ch <- prometheus.MustNewConstMetric(bgpDesc["PeerPeerState"], prometheus.GaugeValue, 0.0, peerRIBLabels...)
 		}
 
-		newCounter(ch, bgpDesc["PeerInputMessages"], peerData.InputMessages.Text, peerRIBLabels...)
-		newCounter(ch, bgpDesc["PeerOutputMessages"], peerData.OutputMessages.Text, peerRIBLabels...)
-		newGauge(ch, bgpDesc["PeerRouteQueueCount"], peerData.RouteQueueCount.Text, peerRIBLabels...)
-		newCounter(ch, bgpDesc["PeerFlapCount"], peerData.FlapCount.Text, peerRIBLabels...)
-		newGauge(ch, bgpDesc["PeerElapsedTime"], peerData.ElapsedTime.Seconds, peerRIBLabels...)
-		newGauge(ch, bgpDesc["PeerRIBActivePrefixCount"], peerData.BGPRIB.ActivePrefixCount, peerRIBLabels...)
-		newGauge(ch, bgpDesc["PeerRIBReceivedPrefixCount"], peerData.BGPRIB.ReceivedPrefixCount, peerRIBLabels...)
-		newGauge(ch, bgpDesc["PeerRIBAcceptedPrefixCount"], peerData.BGPRIB.AcceptedPrefixCount, peerRIBLabels...)
-		newGauge(ch, bgpDesc["PeerRIBSuppressedPrefixCount"], peerData.BGPRIB.SuppressedPrefixCount, peerRIBLabels...)
+		newCounter(logger, ch, bgpDesc["PeerInputMessages"], peerData.InputMessages.Text, peerRIBLabels...)
+		newCounter(logger, ch, bgpDesc["PeerOutputMessages"], peerData.OutputMessages.Text, peerRIBLabels...)
+		newGauge(logger, ch, bgpDesc["PeerRouteQueueCount"], peerData.RouteQueueCount.Text, peerRIBLabels...)
+		newCounter(logger, ch, bgpDesc["PeerFlapCount"], peerData.FlapCount.Text, peerRIBLabels...)
+		newGauge(logger, ch, bgpDesc["PeerElapsedTime"], peerData.ElapsedTime.Seconds, peerRIBLabels...)
+		newGauge(logger, ch, bgpDesc["PeerRIBActivePrefixCount"], peerData.BGPRIB.ActivePrefixCount, peerRIBLabels...)
+		newGauge(logger, ch, bgpDesc["PeerRIBReceivedPrefixCount"], peerData.BGPRIB.ReceivedPrefixCount, peerRIBLabels...)
+		newGauge(logger, ch, bgpDesc["PeerRIBAcceptedPrefixCount"], peerData.BGPRIB.AcceptedPrefixCount, peerRIBLabels...)
+		newGauge(logger, ch, bgpDesc["PeerRIBSuppressedPrefixCount"], peerData.BGPRIB.SuppressedPrefixCount, peerRIBLabels...)
 	}
 
 	for peerType, count := range peerTypes {

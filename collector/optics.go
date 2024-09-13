@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Juniper/go-netconf/netconf"
+	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -81,11 +82,13 @@ var (
 )
 
 // OpticsCollector collects power metrics, implemented as per the Collector interface.
-type OpticsCollector struct{}
+type OpticsCollector struct {
+	logger log.Logger
+}
 
 // NewOpticsCollector returns a new OpticsCollector .
-func NewOpticsCollector() *OpticsCollector {
-	return &OpticsCollector{}
+func NewOpticsCollector(logger log.Logger) *OpticsCollector {
+	return &OpticsCollector{logger: logger}
 }
 
 // Name of the collector.
@@ -111,14 +114,14 @@ func (c *OpticsCollector) Get(ch chan<- prometheus.Metric, conf Config) ([]error
 		return errors, totalOpticsErrors
 	}
 
-	if err := processOpticsNetconfReply(reply, ch); err != nil {
+	if err := processOpticsNetconfReply(reply, ch, c.logger); err != nil {
 		totalOpticsErrors++
 		errors = append(errors, err)
 	}
 	return errors, totalOpticsErrors
 }
 
-func processOpticsNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric) error {
+func processOpticsNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric, logger log.Logger) error {
 	var netconfReply opticsRPCReply
 
 	if err := xml.Unmarshal([]byte(reply.RawReply), &netconfReply); err != nil {
@@ -128,8 +131,8 @@ func processOpticsNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Met
 		labels := []string{strings.TrimSpace(opticsData.Name.Text)}
 		opticsLaserNoLight := -40.0
 
-		newGauge(ch, opticsDesc["ModuleTemperature"], opticsData.OpticsDiagnostics.ModuleTemperature.Temp, labels...)
-		newGauge(ch, opticsDesc["ModuleVoltage"], opticsData.OpticsDiagnostics.ModuleVoltage.Text, labels...)
+		newGauge(logger, ch, opticsDesc["ModuleTemperature"], opticsData.OpticsDiagnostics.ModuleTemperature.Temp, labels...)
+		newGauge(logger, ch, opticsDesc["ModuleVoltage"], opticsData.OpticsDiagnostics.ModuleVoltage.Text, labels...)
 
 		opticsTempHighAlarm := 0.0
 		if opticsData.OpticsDiagnostics.ModuleTemperatureHighAlarm.Text == "off" {
@@ -179,69 +182,69 @@ func processOpticsNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Met
 		}
 		ch <- prometheus.MustNewConstMetric(opticsDesc["ModuleVoltageLowWarn"], prometheus.GaugeValue, opticsVoltageLowWarn, labels...)
 
-		newGauge(ch, opticsDesc["ModuleTemperatureHighAlarmThreshold"], opticsData.OpticsDiagnostics.ModuleTemperatureHighAlarmThreshold.Temp, labels...)
-		newGauge(ch, opticsDesc["ModuleTemperatureLowAlarmThreshold"], opticsData.OpticsDiagnostics.ModuleTemperatureLowAlarmThreshold.Temp, labels...)
-		newGauge(ch, opticsDesc["ModuleTemperatureHighWarnThreshold"], opticsData.OpticsDiagnostics.ModuleTemperatureHighWarnThreshold.Temp, labels...)
-		newGauge(ch, opticsDesc["ModuleTemperatureLowWarnThreshold"], opticsData.OpticsDiagnostics.ModuleTemperatureLowWarnThreshold.Temp, labels...)
-		newGauge(ch, opticsDesc["ModuleVoltageHighAlarmThreshold"], opticsData.OpticsDiagnostics.ModuleVoltageHighAlarmThreshold.Text, labels...)
-		newGauge(ch, opticsDesc["ModuleVoltageLowAlarmThreshold"], opticsData.OpticsDiagnostics.ModuleVoltageLowAlarmThreshold.Text, labels...)
-		newGauge(ch, opticsDesc["ModuleVoltageHighWarnThreshold"], opticsData.OpticsDiagnostics.ModuleVoltageHighWarnThreshold.Text, labels...)
-		newGauge(ch, opticsDesc["ModuleVoltageLowWarnThreshold"], opticsData.OpticsDiagnostics.ModuleVoltageLowWarnThreshold.Text, labels...)
-		newGauge(ch, opticsDesc["LaserBiasCurrentHighAlarmThreshold"], opticsData.OpticsDiagnostics.LaserBiasCurrentHighAlarmThreshold.Text, labels...)
-		newGauge(ch, opticsDesc["LaserBiasCurrentLowAlarmThreshold"], opticsData.OpticsDiagnostics.LaserBiasCurrentLowAlarmThreshold.Text, labels...)
-		newGauge(ch, opticsDesc["LaserBiasCurrentHighWarnThreshold"], opticsData.OpticsDiagnostics.LaserBiasCurrentHighWarnThreshold.Text, labels...)
-		newGauge(ch, opticsDesc["LaserBiasCurrentLowWarnThreshold"], opticsData.OpticsDiagnostics.LaserBiasCurrentLowWarnThreshold.Text, labels...)
-		newGauge(ch, opticsDesc["LaserTxPowerHighAlarmThreshold"], opticsData.OpticsDiagnostics.LaserTxPowerHighAlarmThreshold.Text, labels...)
-		newGauge(ch, opticsDesc["LaserTxPowerHighAlarmThresholdDbm"], opticsData.OpticsDiagnostics.LaserTxPowerHighAlarmThresholdDbm.Text, labels...)
-		newGauge(ch, opticsDesc["LaserTxPowerLowAlarmThreshold"], opticsData.OpticsDiagnostics.LaserTxPowerLowAlarmThreshold.Text, labels...)
-		newGauge(ch, opticsDesc["LaserTxPowerLowAlarmThresholdDbm"], opticsData.OpticsDiagnostics.LaserTxPowerLowAlarmThresholdDbm.Text, labels...)
-		newGauge(ch, opticsDesc["LaserTxPowerHighWarnThreshold"], opticsData.OpticsDiagnostics.LaserTxPowerHighWarnThreshold.Text, labels...)
-		newGauge(ch, opticsDesc["LaserTxPowerHighWarnThresholdDbm"], opticsData.OpticsDiagnostics.LaserTxPowerHighWarnThresholdDbm.Text, labels...)
-		newGauge(ch, opticsDesc["LaserTxPowerLowWarnThreshold"], opticsData.OpticsDiagnostics.LaserTxPowerLowWarnThreshold.Text, labels...)
-		newGauge(ch, opticsDesc["LaserTxPowerLowWarnThresholdDbm"], opticsData.OpticsDiagnostics.LaserTxPowerLowWarnThresholdDbm.Text, labels...)
-		newGauge(ch, opticsDesc["LaserRxPowerHighAlarmThreshold"], opticsData.OpticsDiagnostics.LaserRxPowerHighAlarmThreshold.Text, labels...)
-		newGauge(ch, opticsDesc["LaserRxPowerHighAlarmThresholdDbm"], opticsData.OpticsDiagnostics.LaserRxPowerHighAlarmThresholdDbm.Text, labels...)
-		newGauge(ch, opticsDesc["LaserRxPowerLowAlarmThreshold"], opticsData.OpticsDiagnostics.LaserRxPowerLowAlarmThreshold.Text, labels...)
-		newGauge(ch, opticsDesc["LaserRxPowerLowAlarmThresholdDbm"], opticsData.OpticsDiagnostics.LaserRxPowerLowAlarmThresholdDbm.Text, labels...)
-		newGauge(ch, opticsDesc["LaserRxPowerHighWarnThreshold"], opticsData.OpticsDiagnostics.LaserRxPowerHighWarnThreshold.Text, labels...)
-		newGauge(ch, opticsDesc["LaserRxPowerHighWarnThresholdDbm"], opticsData.OpticsDiagnostics.LaserRxPowerHighWarnThresholdDbm.Text, labels...)
-		newGauge(ch, opticsDesc["LaserRxPowerLowWarnThreshold"], opticsData.OpticsDiagnostics.LaserRxPowerLowWarnThreshold.Text, labels...)
-		newGauge(ch, opticsDesc["LaserRxPowerLowWarnThresholdDbm"], opticsData.OpticsDiagnostics.LaserRxPowerLowWarnThresholdDbm.Text, labels...)
-		newGauge(ch, opticsDesc["NonChannelizedLaserBiasCurrent"], opticsData.OpticsDiagnostics.NonChannelizedLaserBiasCurrent.Text, labels...)
-		newGauge(ch, opticsDesc["NonChannelizedLaserOutputPower"], opticsData.OpticsDiagnostics.NonChannelizedLaserOutputPower.Text, labels...)
-		newGauge(ch, opticsDesc["NonChannelizedRxSignalAvgOpticalPower"], opticsData.OpticsDiagnostics.NonChannelizedRxSignalAvgOpticalPower.Text, labels...)
+		newGauge(logger, ch, opticsDesc["ModuleTemperatureHighAlarmThreshold"], opticsData.OpticsDiagnostics.ModuleTemperatureHighAlarmThreshold.Temp, labels...)
+		newGauge(logger, ch, opticsDesc["ModuleTemperatureLowAlarmThreshold"], opticsData.OpticsDiagnostics.ModuleTemperatureLowAlarmThreshold.Temp, labels...)
+		newGauge(logger, ch, opticsDesc["ModuleTemperatureHighWarnThreshold"], opticsData.OpticsDiagnostics.ModuleTemperatureHighWarnThreshold.Temp, labels...)
+		newGauge(logger, ch, opticsDesc["ModuleTemperatureLowWarnThreshold"], opticsData.OpticsDiagnostics.ModuleTemperatureLowWarnThreshold.Temp, labels...)
+		newGauge(logger, ch, opticsDesc["ModuleVoltageHighAlarmThreshold"], opticsData.OpticsDiagnostics.ModuleVoltageHighAlarmThreshold.Text, labels...)
+		newGauge(logger, ch, opticsDesc["ModuleVoltageLowAlarmThreshold"], opticsData.OpticsDiagnostics.ModuleVoltageLowAlarmThreshold.Text, labels...)
+		newGauge(logger, ch, opticsDesc["ModuleVoltageHighWarnThreshold"], opticsData.OpticsDiagnostics.ModuleVoltageHighWarnThreshold.Text, labels...)
+		newGauge(logger, ch, opticsDesc["ModuleVoltageLowWarnThreshold"], opticsData.OpticsDiagnostics.ModuleVoltageLowWarnThreshold.Text, labels...)
+		newGauge(logger, ch, opticsDesc["LaserBiasCurrentHighAlarmThreshold"], opticsData.OpticsDiagnostics.LaserBiasCurrentHighAlarmThreshold.Text, labels...)
+		newGauge(logger, ch, opticsDesc["LaserBiasCurrentLowAlarmThreshold"], opticsData.OpticsDiagnostics.LaserBiasCurrentLowAlarmThreshold.Text, labels...)
+		newGauge(logger, ch, opticsDesc["LaserBiasCurrentHighWarnThreshold"], opticsData.OpticsDiagnostics.LaserBiasCurrentHighWarnThreshold.Text, labels...)
+		newGauge(logger, ch, opticsDesc["LaserBiasCurrentLowWarnThreshold"], opticsData.OpticsDiagnostics.LaserBiasCurrentLowWarnThreshold.Text, labels...)
+		newGauge(logger, ch, opticsDesc["LaserTxPowerHighAlarmThreshold"], opticsData.OpticsDiagnostics.LaserTxPowerHighAlarmThreshold.Text, labels...)
+		newGauge(logger, ch, opticsDesc["LaserTxPowerHighAlarmThresholdDbm"], opticsData.OpticsDiagnostics.LaserTxPowerHighAlarmThresholdDbm.Text, labels...)
+		newGauge(logger, ch, opticsDesc["LaserTxPowerLowAlarmThreshold"], opticsData.OpticsDiagnostics.LaserTxPowerLowAlarmThreshold.Text, labels...)
+		newGauge(logger, ch, opticsDesc["LaserTxPowerLowAlarmThresholdDbm"], opticsData.OpticsDiagnostics.LaserTxPowerLowAlarmThresholdDbm.Text, labels...)
+		newGauge(logger, ch, opticsDesc["LaserTxPowerHighWarnThreshold"], opticsData.OpticsDiagnostics.LaserTxPowerHighWarnThreshold.Text, labels...)
+		newGauge(logger, ch, opticsDesc["LaserTxPowerHighWarnThresholdDbm"], opticsData.OpticsDiagnostics.LaserTxPowerHighWarnThresholdDbm.Text, labels...)
+		newGauge(logger, ch, opticsDesc["LaserTxPowerLowWarnThreshold"], opticsData.OpticsDiagnostics.LaserTxPowerLowWarnThreshold.Text, labels...)
+		newGauge(logger, ch, opticsDesc["LaserTxPowerLowWarnThresholdDbm"], opticsData.OpticsDiagnostics.LaserTxPowerLowWarnThresholdDbm.Text, labels...)
+		newGauge(logger, ch, opticsDesc["LaserRxPowerHighAlarmThreshold"], opticsData.OpticsDiagnostics.LaserRxPowerHighAlarmThreshold.Text, labels...)
+		newGauge(logger, ch, opticsDesc["LaserRxPowerHighAlarmThresholdDbm"], opticsData.OpticsDiagnostics.LaserRxPowerHighAlarmThresholdDbm.Text, labels...)
+		newGauge(logger, ch, opticsDesc["LaserRxPowerLowAlarmThreshold"], opticsData.OpticsDiagnostics.LaserRxPowerLowAlarmThreshold.Text, labels...)
+		newGauge(logger, ch, opticsDesc["LaserRxPowerLowAlarmThresholdDbm"], opticsData.OpticsDiagnostics.LaserRxPowerLowAlarmThresholdDbm.Text, labels...)
+		newGauge(logger, ch, opticsDesc["LaserRxPowerHighWarnThreshold"], opticsData.OpticsDiagnostics.LaserRxPowerHighWarnThreshold.Text, labels...)
+		newGauge(logger, ch, opticsDesc["LaserRxPowerHighWarnThresholdDbm"], opticsData.OpticsDiagnostics.LaserRxPowerHighWarnThresholdDbm.Text, labels...)
+		newGauge(logger, ch, opticsDesc["LaserRxPowerLowWarnThreshold"], opticsData.OpticsDiagnostics.LaserRxPowerLowWarnThreshold.Text, labels...)
+		newGauge(logger, ch, opticsDesc["LaserRxPowerLowWarnThresholdDbm"], opticsData.OpticsDiagnostics.LaserRxPowerLowWarnThresholdDbm.Text, labels...)
+		newGauge(logger, ch, opticsDesc["NonChannelizedLaserBiasCurrent"], opticsData.OpticsDiagnostics.NonChannelizedLaserBiasCurrent.Text, labels...)
+		newGauge(logger, ch, opticsDesc["NonChannelizedLaserOutputPower"], opticsData.OpticsDiagnostics.NonChannelizedLaserOutputPower.Text, labels...)
+		newGauge(logger, ch, opticsDesc["NonChannelizedRxSignalAvgOpticalPower"], opticsData.OpticsDiagnostics.NonChannelizedRxSignalAvgOpticalPower.Text, labels...)
 
 		if strings.TrimSpace(opticsData.OpticsDiagnostics.NonChannelizedLaserOutputPowerDbm.Text) == "- Inf" {
 			ch <- prometheus.MustNewConstMetric(opticsDesc["NonChannelizedLaserOutputPowerDbm"], prometheus.GaugeValue, opticsLaserNoLight, labels...)
 		} else {
-			newGauge(ch, opticsDesc["NonChannelizedLaserOutputPowerDbm"], opticsData.OpticsDiagnostics.NonChannelizedLaserOutputPowerDbm.Text, labels...)
+			newGauge(logger, ch, opticsDesc["NonChannelizedLaserOutputPowerDbm"], opticsData.OpticsDiagnostics.NonChannelizedLaserOutputPowerDbm.Text, labels...)
 		}
 
 		if strings.TrimSpace(opticsData.OpticsDiagnostics.NonChannelizedRxSignalAvgOpticalPowerDbm.Text) == "- Inf" {
 			ch <- prometheus.MustNewConstMetric(opticsDesc["NonChannelizedRxSignalAvgOpticalPowerDbm"], prometheus.GaugeValue, opticsLaserNoLight, labels...)
 		} else {
-			newGauge(ch, opticsDesc["NonChannelizedRxSignalAvgOpticalPowerDbm"], opticsData.OpticsDiagnostics.NonChannelizedRxSignalAvgOpticalPowerDbm.Text, labels...)
+			newGauge(logger, ch, opticsDesc["NonChannelizedRxSignalAvgOpticalPowerDbm"], opticsData.OpticsDiagnostics.NonChannelizedRxSignalAvgOpticalPowerDbm.Text, labels...)
 		}
 
 		for _, lane := range opticsData.OpticsDiagnostics.OpticsDiagLanes {
 			laneIndex := strings.TrimSpace(lane.LaneIndex.Text)
 			laneLabels := append(labels, laneIndex)
-			newGauge(ch, opticsDesc["LaneIndex"], lane.LaneIndex.Text, laneLabels...)
-			newGauge(ch, opticsDesc["LaserBiasCurrent"], lane.LaserBiasCurrent.Text, laneLabels...)
-			newGauge(ch, opticsDesc["LaserOutputPower"], lane.LaserOutputPower.Text, laneLabels...)
+			newGauge(logger, ch, opticsDesc["LaneIndex"], lane.LaneIndex.Text, laneLabels...)
+			newGauge(logger, ch, opticsDesc["LaserBiasCurrent"], lane.LaserBiasCurrent.Text, laneLabels...)
+			newGauge(logger, ch, opticsDesc["LaserOutputPower"], lane.LaserOutputPower.Text, laneLabels...)
 
 			if strings.TrimSpace(lane.LaserOutputPowerDbm.Text) == "- Inf" {
 				ch <- prometheus.MustNewConstMetric(opticsDesc["LaserOutputPowerDbm"], prometheus.GaugeValue, opticsLaserNoLight, laneLabels...)
 			} else {
-				newGauge(ch, opticsDesc["LaserOutputPowerDbm"], lane.LaserOutputPowerDbm.Text, laneLabels...)
+				newGauge(logger, ch, opticsDesc["LaserOutputPowerDbm"], lane.LaserOutputPowerDbm.Text, laneLabels...)
 			}
 
-			newGauge(ch, opticsDesc["LaserRxOpticalPower"], lane.LaserRxOpticalPower.Text, laneLabels...)
+			newGauge(logger, ch, opticsDesc["LaserRxOpticalPower"], lane.LaserRxOpticalPower.Text, laneLabels...)
 
 			if strings.TrimSpace(lane.LaserRxOpticalPowerDbm.Text) == "- Inf" {
 				ch <- prometheus.MustNewConstMetric(opticsDesc["LaserRxOpticalPowerDbm"], prometheus.GaugeValue, opticsLaserNoLight, laneLabels...)
 			} else {
-				newGauge(ch, opticsDesc["LaserRxOpticalPowerDbm"], lane.LaserRxOpticalPowerDbm.Text, laneLabels...)
+				newGauge(logger, ch, opticsDesc["LaserRxOpticalPowerDbm"], lane.LaserRxOpticalPowerDbm.Text, laneLabels...)
 			}
 
 			opticLaneLaserBiasCurrentHighAlarm := 0.0

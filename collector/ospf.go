@@ -3,26 +3,30 @@ package collector
 import (
 	"encoding/xml"
 	"fmt"
+
 	"github.com/Juniper/go-netconf/netconf"
+	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
 var (
-  ospfSubsystem   = "ospf"
-  totalOSPFErrors = 0.0
+	ospfSubsystem   = "ospf"
+	totalOSPFErrors = 0.0
 
-  ospfPeerLabels = []string{"neighbor_address", "neighbor_id", "local_interface"}
-  ospfDesc = map[string]*prometheus.Desc{
-        "NeighborStatus": colPromDesc(ospfSubsystem, "neighbot_status", "OSPF Neighbor Status", ospfPeerLabels),   
+	ospfPeerLabels = []string{"neighbor_address", "neighbor_id", "local_interface"}
+	ospfDesc       = map[string]*prometheus.Desc{
+		"NeighborStatus": colPromDesc(ospfSubsystem, "neighbot_status", "OSPF Neighbor Status", ospfPeerLabels),
 	}
 )
 
 // EnvCollector collects environment metrics, implemented as per the Collector interface.
-type OSPFCollector struct{}
+type OSPFCollector struct {
+	logger log.Logger
+}
 
 // NewEnvCollector returns a new EnvCollector.
-func NewOSPFCollector() *OSPFCollector {
-	return &OSPFCollector{}
+func NewOSPFCollector(logger log.Logger) *OSPFCollector {
+	return &OSPFCollector{logger: logger}
 }
 
 // Name of the collector.
@@ -41,7 +45,7 @@ func (c *OSPFCollector) Get(ch chan<- prometheus.Metric, conf Config) ([]error, 
 	}
 	defer s.Close()
 
-  // show ospf neighbor | display xml
+	// show ospf neighbor | display xml
 	reply, err := s.Exec(netconf.RawMethod(`<get-ospf-neighbor-information/>`))
 	if err != nil {
 		totalOSPFErrors++
@@ -49,50 +53,49 @@ func (c *OSPFCollector) Get(ch chan<- prometheus.Metric, conf Config) ([]error, 
 		return errors, totalOSPFErrors
 	}
 
-    if err := processOSPFNetconfReply(reply, ch); err != nil {
-        totalOSPFErrors++
-        errors = append(errors, err)
-    }
+	if err := processOSPFNetconfReply(reply, ch); err != nil {
+		totalOSPFErrors++
+		errors = append(errors, err)
+	}
 	return errors, totalOSPFErrors
 }
 
 func processOSPFNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric) error {
-    ospfNbrStatus := 0.0
-    var netconfReply ospfNeighborRPCReply
-    if err := xml.Unmarshal([]byte(reply.RawReply), &netconfReply); err != nil {
-        return fmt.Errorf("could not unmarshal netconf ospf neighbor reply: %s", err)
-    }
-    for _, neighbor := range netconfReply.OSPFNbrInformation.OSPFNeighbor {
-        ospfNbrStatus = 0.0
-        ospfPeerLabels := []string{
-            neighbor.NeighborAddress,
-            neighbor.NeighborId,
-            neighbor.InterfaceName,
-        }
-        if neighbor.OSPFNeighborState == "Full" {
-            ospfNbrStatus = 1.0
-        }
-        ch <- prometheus.MustNewConstMetric(ospfDesc["NeighborStatus"], prometheus.GaugeValue, ospfNbrStatus, ospfPeerLabels...) 
-    }
-    return nil
+	ospfNbrStatus := 0.0
+	var netconfReply ospfNeighborRPCReply
+	if err := xml.Unmarshal([]byte(reply.RawReply), &netconfReply); err != nil {
+		return fmt.Errorf("could not unmarshal netconf ospf neighbor reply: %s", err)
+	}
+	for _, neighbor := range netconfReply.OSPFNbrInformation.OSPFNeighbor {
+		ospfNbrStatus = 0.0
+		ospfPeerLabels := []string{
+			neighbor.NeighborAddress,
+			neighbor.NeighborId,
+			neighbor.InterfaceName,
+		}
+		if neighbor.OSPFNeighborState == "Full" {
+			ospfNbrStatus = 1.0
+		}
+		ch <- prometheus.MustNewConstMetric(ospfDesc["NeighborStatus"], prometheus.GaugeValue, ospfNbrStatus, ospfPeerLabels...)
+	}
+	return nil
 }
 
 type ospfNeighborRPCReply struct {
-    XMLName             xml.Name            `xml:"rpc-reply"`
-    Xmlns               string              `xml:"xmlns,attr"`
-    OSPFNbrInformation  ospfNbrInformation  `xml:"ospf-neighbor-information"`
+	XMLName            xml.Name           `xml:"rpc-reply"`
+	Xmlns              string             `xml:"xmlns,attr"`
+	OSPFNbrInformation ospfNbrInformation `xml:"ospf-neighbor-information"`
 }
 
 type ospfNbrInformation struct {
-    OSPFNeighbor    []ospfNeighbor  `xml:"ospf-neighbor"`
+	OSPFNeighbor []ospfNeighbor `xml:"ospf-neighbor"`
 }
 
 type ospfNeighbor struct {
-    NeighborAddress     string  `xml:"neighbor-address"`
-    InterfaceName       string  `xml:"interface-name"`
-    OSPFNeighborState   string  `xml:"ospf-neighbor-state"`
-    NeighborId          string  `xml:"neighbor-id"`
-    NeighborPriority    string  `xml:"neighbor-priority"`
-    ActivityTimer       string  `xml:"activity-timer"`
+	NeighborAddress   string `xml:"neighbor-address"`
+	InterfaceName     string `xml:"interface-name"`
+	OSPFNeighborState string `xml:"ospf-neighbor-state"`
+	NeighborId        string `xml:"neighbor-id"`
+	NeighborPriority  string `xml:"neighbor-priority"`
+	ActivityTimer     string `xml:"activity-timer"`
 }
-

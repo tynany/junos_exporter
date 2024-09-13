@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Juniper/go-netconf/netconf"
+	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -30,11 +31,13 @@ var (
 )
 
 // FPCCollector collects environment metrics, implemented as per the Collector interface.
-type FPCCollector struct{}
+type FPCCollector struct {
+	logger log.Logger
+}
 
 // NewFPCCollector returns a new FPCCollector.
-func NewFPCCollector() *FPCCollector {
-	return &FPCCollector{}
+func NewFPCCollector(logger log.Logger) *FPCCollector {
+	return &FPCCollector{logger: logger}
 }
 
 // Name of the collector.

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Juniper/go-netconf/netconf"
+	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -48,11 +49,13 @@ func getREDesc() (map[string]*prometheus.Desc, map[string]*prometheus.Desc) {
 }
 
 // RECollector collects route engine metrics, implemented as per the Collector interface.
-type RECollector struct{}
+type RECollector struct {
+	logger log.Logger
+}
 
 // NewRECollector returns a new RECollector.
-func NewRECollector() *RECollector {
-	return &RECollector{}
+func NewRECollector(logger log.Logger) *RECollector {
+	return &RECollector{logger: logger}
 }
 
 // Name of the collector.
@@ -78,14 +81,14 @@ func (c *RECollector) Get(ch chan<- prometheus.Metric, conf Config) ([]error, fl
 		return errors, totalREErrors
 	}
 
-	if err := processRENetconfReply(reply, ch); err != nil {
+	if err := processRENetconfReply(reply, ch, c.logger); err != nil {
 		totalREErrors++
 		errors = append(errors, err)
 	}
 	return errors, totalREErrors
 }
 
-func processRENetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric) error {
+func processRENetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric, logger log.Logger) error {
 	var netconfReply reRPCReply
 	reDesc, multiREDesc := getREDesc()
 
@@ -102,7 +105,7 @@ func processRENetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric)
 					labels = []string{reData.Slot.Text}
 				}
 				labels = append(labels, re.REName)
-				sendREMetrics(ch, multiREDesc, labels, reData)
+				sendREMetrics(ch, multiREDesc, labels, reData, logger)
 			}
 		}
 		return nil
@@ -114,12 +117,12 @@ func processRENetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric)
 		if reData.Slot.Text != "" {
 			labels = []string{reData.Slot.Text}
 		}
-		sendREMetrics(ch, reDesc, labels, reData)
+		sendREMetrics(ch, reDesc, labels, reData, logger)
 	}
 	return nil
 }
 
-func sendREMetrics(ch chan<- prometheus.Metric, reDesc map[string]*prometheus.Desc, labels []string, reData reEntry) {
+func sendREMetrics(ch chan<- prometheus.Metric, reDesc map[string]*prometheus.Desc, labels []string, reData reEntry, logger log.Logger) {
 
 	state := 0.0
 	if strings.ToLower(reData.Status.Text) == "ok" {
@@ -127,46 +130,46 @@ func sendREMetrics(ch chan<- prometheus.Metric, reDesc map[string]*prometheus.De
 	}
 	ch <- prometheus.MustNewConstMetric(reDesc["state"], prometheus.GaugeValue, state, labels...)
 
-	newGauge(ch, reDesc["temp"], reData.Temperature.Temp, labels...)
-	newGauge(ch, reDesc["cpuTemp"], reData.CPUTemperature.Temp, labels...)
-	newGauge(ch, reDesc["uptime"], reData.UpTime.Seconds, labels...)
+	newGauge(logger, ch, reDesc["temp"], reData.Temperature.Temp, labels...)
+	newGauge(logger, ch, reDesc["cpuTemp"], reData.CPUTemperature.Temp, labels...)
+	newGauge(logger, ch, reDesc["uptime"], reData.UpTime.Seconds, labels...)
 
-	newGaugeMB(ch, reDesc["memTotal"], reData.MemorySystemTotal.Text, labels...)
-	newGaugeMB(ch, reDesc["memUsed"], reData.MemorySystemTotalUsed.Text, labels...)
-	newGauge(ch, reDesc["memBuf"], reData.MemoryBufferUtilization.Text, labels...)
-	newGaugeMB(ch, reDesc["memDRAM"], reData.MemoryDRAMSize.Text, labels...)
-	newGaugeMB(ch, reDesc["memInstalled"], reData.MemoryInstalledSize.Text, labels...)
+	newGaugeMB(logger, ch, reDesc["memTotal"], reData.MemorySystemTotal.Text, labels...)
+	newGaugeMB(logger, ch, reDesc["memUsed"], reData.MemorySystemTotalUsed.Text, labels...)
+	newGauge(logger, ch, reDesc["memBuf"], reData.MemoryBufferUtilization.Text, labels...)
+	newGaugeMB(logger, ch, reDesc["memDRAM"], reData.MemoryDRAMSize.Text, labels...)
+	newGaugeMB(logger, ch, reDesc["memInstalled"], reData.MemoryInstalledSize.Text, labels...)
 
 	label5s := append(labels, "5s")
-	newGauge(ch, reDesc["cpuUser"], reData.CPUUser.Text, label5s...)
-	newGauge(ch, reDesc["cpuBackground"], reData.CPUBackground.Text, label5s...)
-	newGauge(ch, reDesc["cpuSystem"], reData.CPUSystem.Text, label5s...)
-	newGauge(ch, reDesc["cpuInterrupt"], reData.CPUInterrupt.Text, label5s...)
-	newGauge(ch, reDesc["cpuIdle"], reData.CPUIdle.Text, label5s...)
+	newGauge(logger, ch, reDesc["cpuUser"], reData.CPUUser.Text, label5s...)
+	newGauge(logger, ch, reDesc["cpuBackground"], reData.CPUBackground.Text, label5s...)
+	newGauge(logger, ch, reDesc["cpuSystem"], reData.CPUSystem.Text, label5s...)
+	newGauge(logger, ch, reDesc["cpuInterrupt"], reData.CPUInterrupt.Text, label5s...)
+	newGauge(logger, ch, reDesc["cpuIdle"], reData.CPUIdle.Text, label5s...)
 
 	label1m := append(labels, "1m")
-	newGauge(ch, reDesc["cpuUser"], reData.CPUUser1.Text, label1m...)
-	newGauge(ch, reDesc["cpuBackground"], reData.CPUBackground1.Text, label1m...)
-	newGauge(ch, reDesc["cpuSystem"], reData.CPUSystem1.Text, label1m...)
-	newGauge(ch, reDesc["cpuInterrupt"], reData.CPUInterrupt1.Text, label1m...)
-	newGauge(ch, reDesc["cpuIdle"], reData.CPUIdle1.Text, label1m...)
-	newGauge(ch, reDesc["loadAvg"], reData.LoadAverageOne.Text, label1m...)
+	newGauge(logger, ch, reDesc["cpuUser"], reData.CPUUser1.Text, label1m...)
+	newGauge(logger, ch, reDesc["cpuBackground"], reData.CPUBackground1.Text, label1m...)
+	newGauge(logger, ch, reDesc["cpuSystem"], reData.CPUSystem1.Text, label1m...)
+	newGauge(logger, ch, reDesc["cpuInterrupt"], reData.CPUInterrupt1.Text, label1m...)
+	newGauge(logger, ch, reDesc["cpuIdle"], reData.CPUIdle1.Text, label1m...)
+	newGauge(logger, ch, reDesc["loadAvg"], reData.LoadAverageOne.Text, label1m...)
 
 	label5m := append(labels, "5m")
-	newGauge(ch, reDesc["cpuUser"], reData.CPUUser2.Text, label5m...)
-	newGauge(ch, reDesc["cpuBackground"], reData.CPUBackground2.Text, label5m...)
-	newGauge(ch, reDesc["cpuSystem"], reData.CPUSystem2.Text, label5m...)
-	newGauge(ch, reDesc["cpuInterrupt"], reData.CPUInterrupt2.Text, label5m...)
-	newGauge(ch, reDesc["cpuIdle"], reData.CPUIdle2.Text, label5m...)
-	newGauge(ch, reDesc["loadAvg"], reData.LoadAverageFive.Text, label5m...)
+	newGauge(logger, ch, reDesc["cpuUser"], reData.CPUUser2.Text, label5m...)
+	newGauge(logger, ch, reDesc["cpuBackground"], reData.CPUBackground2.Text, label5m...)
+	newGauge(logger, ch, reDesc["cpuSystem"], reData.CPUSystem2.Text, label5m...)
+	newGauge(logger, ch, reDesc["cpuInterrupt"], reData.CPUInterrupt2.Text, label5m...)
+	newGauge(logger, ch, reDesc["cpuIdle"], reData.CPUIdle2.Text, label5m...)
+	newGauge(logger, ch, reDesc["loadAvg"], reData.LoadAverageFive.Text, label5m...)
 
 	label15m := append(labels, "15m")
-	newGauge(ch, reDesc["cpuUser"], reData.CPUUser3.Text, label15m...)
-	newGauge(ch, reDesc["cpuBackground"], reData.CPUBackground3.Text, label15m...)
-	newGauge(ch, reDesc["cpuSystem"], reData.CPUSystem3.Text, label15m...)
-	newGauge(ch, reDesc["cpuInterrupt"], reData.CPUInterrupt3.Text, label15m...)
-	newGauge(ch, reDesc["cpuIdle"], reData.CPUIdle3.Text, label15m...)
-	newGauge(ch, reDesc["loadAvg"], reData.LoadAverageFifteen.Text, label15m...)
+	newGauge(logger, ch, reDesc["cpuUser"], reData.CPUUser3.Text, label15m...)
+	newGauge(logger, ch, reDesc["cpuBackground"], reData.CPUBackground3.Text, label15m...)
+	newGauge(logger, ch, reDesc["cpuSystem"], reData.CPUSystem3.Text, label15m...)
+	newGauge(logger, ch, reDesc["cpuInterrupt"], reData.CPUInterrupt3.Text, label15m...)
+	newGauge(logger, ch, reDesc["cpuIdle"], reData.CPUIdle3.Text, label15m...)
+	newGauge(logger, ch, reDesc["loadAvg"], reData.LoadAverageFifteen.Text, label15m...)
 
 	mState := 0.0
 	if strings.ToLower(reData.MastershipState.Text) == "master" {

@@ -4,26 +4,30 @@ import (
 	"encoding/xml"
 	"fmt"
 	"strings"
+
 	"github.com/Juniper/go-netconf/netconf"
+	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
 var (
 	ipsecSubsystem   = "ipsec"
-  totalIpsecErrors = 0.0
+	totalIpsecErrors = 0.0
 
-  ipsecLabels = map[string][]string{"TunnelInformation": []string{"saremotegateway", "satunnelindex"}}
+	ipsecLabels = map[string][]string{"TunnelInformation": []string{"saremotegateway", "satunnelindex"}}
 	ipsecDesc   = map[string]*prometheus.Desc{
-		"TunnelStatusUp":   colPromDesc(ipsecSubsystem, "tunnel_status_up", "Tunnel Status (1 UP, 0 DOWN)", ipsecLabels["TunnelInformation"]),
+		"TunnelStatusUp": colPromDesc(ipsecSubsystem, "tunnel_status_up", "Tunnel Status (1 UP, 0 DOWN)", ipsecLabels["TunnelInformation"]),
 	}
 )
 
 // EnvCollector collects environment metrics, implemented as per the Collector interface.
-type IpsecCollector struct{}
+type IpsecCollector struct {
+	logger log.Logger
+}
 
 // NewEnvCollector returns a new EnvCollector.
-func NewIpsecCollector() *IpsecCollector {
-	return &IpsecCollector{}
+func NewIpsecCollector(logger log.Logger) *IpsecCollector {
+	return &IpsecCollector{logger: logger}
 }
 
 // Name of the collector.
@@ -42,7 +46,7 @@ func (c *IpsecCollector) Get(ch chan<- prometheus.Metric, conf Config) ([]error,
 	}
 	defer s.Close()
 
-  // IPsec inactive tunnels
+	// IPsec inactive tunnels
 	reply, err := s.Exec(netconf.RawMethod(`<get-inactive-tunnels/>`))
 	if err != nil {
 		totalIpsecErrors++
@@ -55,7 +59,7 @@ func (c *IpsecCollector) Get(ch chan<- prometheus.Metric, conf Config) ([]error,
 		errors = append(errors, err)
 	}
 
-  // IPsec active tunnels
+	// IPsec active tunnels
 	reply, err = s.Exec(netconf.RawMethod(`<get-security-associations-information/>`))
 	if err != nil {
 		totalIpsecErrors++
@@ -78,15 +82,15 @@ func processIpsecInactiveNetconfReply(reply *netconf.RPCReply, ch chan<- prometh
 		return fmt.Errorf("could not unmarshal netconf inactive tunnel reply xml: %s", err)
 	}
 
-  // Send tunnel status of inactive tunnels to Prometheus channel.
-  // Set tunnel_status_up to 0
-  for _, ipsecData := range netconfInactiveTunnelReply.IpsecUnestablishedTunnelInformation.IpsecSecurityAssociationsBlock {
-    saRemoteGateway := strings.Trim(ipsecData.IpsecSecurityAssociations.SaRemoteGateway, "\n")
-    saTunnelIndex := strings.Trim(ipsecData.IpsecSecurityAssociations.SaTunnelIndex, "\n")
-    ch <- prometheus.MustNewConstMetric(ipsecDesc["TunnelStatusUp"], prometheus.GaugeValue, 0, saRemoteGateway, saTunnelIndex)
-  }
+	// Send tunnel status of inactive tunnels to Prometheus channel.
+	// Set tunnel_status_up to 0
+	for _, ipsecData := range netconfInactiveTunnelReply.IpsecUnestablishedTunnelInformation.IpsecSecurityAssociationsBlock {
+		saRemoteGateway := strings.Trim(ipsecData.IpsecSecurityAssociations.SaRemoteGateway, "\n")
+		saTunnelIndex := strings.Trim(ipsecData.IpsecSecurityAssociations.SaTunnelIndex, "\n")
+		ch <- prometheus.MustNewConstMetric(ipsecDesc["TunnelStatusUp"], prometheus.GaugeValue, 0, saRemoteGateway, saTunnelIndex)
+	}
 
-  return nil
+	return nil
 }
 
 // Process active ipsec SAs.
@@ -97,15 +101,15 @@ func processIpsecActiveNetconfReply(reply *netconf.RPCReply, ch chan<- prometheu
 		return fmt.Errorf("could not unmarshal netconf active tunnel reply xml: %s", err)
 	}
 
-  // Send tunnel status of active tunnels to Prometheus channel.
-  // Set tunnel_status_up to 1
-  for _, ipsecData := range netconfActiveTunnelReply.IpsecSecurityAssociationsInformation.IpsecSecurityAssociationsBlock {
-    saRemoteGateway := strings.Trim(ipsecData.IpsecSecurityAssociations.SaRemoteGateway, "\n")
-    saTunnelIndex := strings.Trim(ipsecData.IpsecSecurityAssociations.SaTunnelIndex, "\n")
-    ch <- prometheus.MustNewConstMetric(ipsecDesc["TunnelStatusUp"], prometheus.GaugeValue, 1, saRemoteGateway, saTunnelIndex)
-  }
+	// Send tunnel status of active tunnels to Prometheus channel.
+	// Set tunnel_status_up to 1
+	for _, ipsecData := range netconfActiveTunnelReply.IpsecSecurityAssociationsInformation.IpsecSecurityAssociationsBlock {
+		saRemoteGateway := strings.Trim(ipsecData.IpsecSecurityAssociations.SaRemoteGateway, "\n")
+		saTunnelIndex := strings.Trim(ipsecData.IpsecSecurityAssociations.SaTunnelIndex, "\n")
+		ch <- prometheus.MustNewConstMetric(ipsecDesc["TunnelStatusUp"], prometheus.GaugeValue, 1, saRemoteGateway, saTunnelIndex)
+	}
 
-  return nil
+	return nil
 }
 
 type InactiveTunnelReply struct {
@@ -132,7 +136,7 @@ type InactiveTunnelReply struct {
 			} `xml:"ipsec-security-associations"`
 		} `xml:"ipsec-security-associations-block"`
 	} `xml:"ipsec-unestablished-tunnel-information"`
-} 
+}
 
 type ActiveTunnelReply struct {
 	XMLName                              xml.Name `xml:"rpc-reply"`
@@ -167,4 +171,4 @@ type ActiveTunnelReply struct {
 		Text   string `xml:",chardata"`
 		Banner string `xml:"banner"`
 	} `xml:"cli"`
-} 
+}
