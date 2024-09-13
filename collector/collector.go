@@ -7,7 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/prometheus/common/log"
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/crypto/ssh"
@@ -48,13 +49,15 @@ type Config struct {
 type Exporter struct {
 	Collectors []Collector
 	config     Config
+	logger     log.Logger
 }
 
 // NewExporter returns a new Exporter.
-func NewExporter(collectors []Collector, config Config) (*Exporter, error) {
+func NewExporter(collectors []Collector, config Config, logger log.Logger) (*Exporter, error) {
 	return &Exporter{
 		Collectors: collectors,
 		config:     config,
+		logger:     logger,
 	}, nil
 }
 
@@ -66,12 +69,12 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	wg := &sync.WaitGroup{}
 	for _, collector := range e.Collectors {
 		wg.Add(1)
-		go e.runCollector(ch, collector, wg)
+		go e.runCollector(ch, collector, wg, e.logger)
 	}
 	wg.Wait()
 }
 
-func (e *Exporter) runCollector(ch chan<- prometheus.Metric, collector Collector, wg *sync.WaitGroup) {
+func (e *Exporter) runCollector(ch chan<- prometheus.Metric, collector Collector, wg *sync.WaitGroup, logger log.Logger) {
 	defer wg.Done()
 	collectorName := collector.Name()
 
@@ -84,7 +87,7 @@ func (e *Exporter) runCollector(ch chan<- prometheus.Metric, collector Collector
 	if len(errors) > 0 {
 		ch <- prometheus.MustNewConstMetric(junosDesc["CollectorUp"], prometheus.GaugeValue, 0, collector.Name())
 		for _, err := range errors {
-			log.Errorf("collector %q scrape failed: %s", collectorName, err)
+			level.Error(logger).Log("msg", "collector scrape failed", "collector", collectorName, "err", err)
 		}
 	} else {
 		ch <- prometheus.MustNewConstMetric(junosDesc["CollectorUp"], prometheus.GaugeValue, 1, collectorName)
@@ -106,32 +109,32 @@ func colPromDesc(subsystem string, metricName string, metricDescription string, 
 	return prometheus.NewDesc(prometheus.BuildFQName(namespace, subsystem, metricName), metricDescription, labels, nil)
 }
 
-func newGauge(ch chan<- prometheus.Metric, descName *prometheus.Desc, metric string, labels ...string) {
+func newGauge(logger log.Logger, ch chan<- prometheus.Metric, descName *prometheus.Desc, metric string, labels ...string) {
 	if metric != "" {
 		i, err := strconv.ParseFloat(strings.TrimSpace(metric), 64)
 		if err != nil {
-			log.Errorf("could not convert metric to float64: %s", err)
+			level.Error(logger).Log("msg", "could not convert metric to float64", "err", err)
 		}
 		ch <- prometheus.MustNewConstMetric(descName, prometheus.GaugeValue, i, labels...)
 	}
 }
 
-func newCounter(ch chan<- prometheus.Metric, descName *prometheus.Desc, metric string, labels ...string) {
+func newCounter(logger log.Logger, ch chan<- prometheus.Metric, descName *prometheus.Desc, metric string, labels ...string) {
 	if metric != "" {
 		i, err := strconv.ParseFloat(strings.TrimSpace(metric), 64)
 		if err != nil {
-			log.Errorf("could not convert metric to float64: %s", err)
+			level.Error(logger).Log("msg", "could not convert metric to float64", "err", err)
 		}
 		ch <- prometheus.MustNewConstMetric(descName, prometheus.CounterValue, i, labels...)
 	}
 }
 
-func newGaugeMB(ch chan<- prometheus.Metric, descName *prometheus.Desc, metric string, labels ...string) {
+func newGaugeMB(logger log.Logger, ch chan<- prometheus.Metric, descName *prometheus.Desc, metric string, labels ...string) {
 	if metric != "" {
 		re := regexp.MustCompile("[0-9]+")
 		i, err := strconv.ParseFloat(strings.TrimSpace(re.FindString(metric)), 64)
 		if err != nil {
-			log.Errorf("could not convert metric to float64: %s", err)
+			level.Error(logger).Log("msg", "could not convert metric to float64", "err", err)
 		}
 
 		ch <- prometheus.MustNewConstMetric(descName, prometheus.GaugeValue, i*1000000, labels...)

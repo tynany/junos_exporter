@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Juniper/go-netconf/netconf"
+	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -29,11 +30,13 @@ var (
 )
 
 // EnvCollector collects environment metrics, implemented as per the Collector interface.
-type EnvCollector struct{}
+type EnvCollector struct {
+	logger log.Logger
+}
 
 // NewEnvCollector returns a new EnvCollector.
-func NewEnvCollector() *EnvCollector {
-	return &EnvCollector{}
+func NewEnvCollector(logger log.Logger) *EnvCollector {
+	return &EnvCollector{logger: logger}
 }
 
 // Name of the collector.
@@ -68,7 +71,7 @@ func (c *EnvCollector) Get(ch chan<- prometheus.Metric, conf Config) ([]error, f
 		return errors, totalEnvErrors
 	}
 
-	if err := processEnvNetconfReply(replyEnv, replyEnvTempThreshold, ch); err != nil {
+	if err := processEnvNetconfReply(replyEnv, replyEnvTempThreshold, ch, c.logger); err != nil {
 		totalEnvErrors++
 		errors = append(errors, err)
 	}
@@ -80,6 +83,7 @@ func processEnvNetconfReply(
 	replyEnv *netconf.RPCReply,
 	replyEnvTempThreshold *netconf.RPCReply,
 	ch chan<- prometheus.Metric,
+	logger log.Logger,
 ) error {
 	var netconfEnvReply envRPCReply
 	var netconfEnvTempThresholdReply envTempThresholdRPCReply
@@ -95,7 +99,7 @@ func processEnvNetconfReply(
 			envStatus = 1.0
 		}
 		ch <- prometheus.MustNewConstMetric(envDesc["Status"], prometheus.GaugeValue, envStatus, labels...)
-		newGauge(ch, envDesc["Temp"], envData.Temperature.Temp, labels...)
+		newGauge(logger, ch, envDesc["Temp"], envData.Temperature.Temp, labels...)
 	}
 	// ** unmarshal show chassis temperature-thresholds <get-environment-information> END ** //
 
@@ -107,13 +111,13 @@ func processEnvNetconfReply(
 	for _, envTempThresholdData := range netconfEnvTempThresholdReply.EnvTempThresholdInformation.EnvTempThreshold {
 		labels := []string{strings.TrimSpace(envTempThresholdData.Name.Text)}
 
-		newGauge(ch, envDesc["FanNormalSpeed"], envTempThresholdData.FanNormalSpeed.Text, labels...)
-		newGauge(ch, envDesc["FanHighSpeed"], envTempThresholdData.FanHighSpeed.Text, labels...)
-		newGauge(ch, envDesc["BadFanYellowAlarm"], envTempThresholdData.BadFanYellowAlarm.Text, labels...)
-		newGauge(ch, envDesc["BadFanRedAlarm"], envTempThresholdData.BadFanRedAlarm.Text, labels...)
-		newGauge(ch, envDesc["YellowAlarm"], envTempThresholdData.YellowAlarm.Text, labels...)
-		newGauge(ch, envDesc["RedAlarm"], envTempThresholdData.RedAlarm.Text, labels...)
-		newGauge(ch, envDesc["FireShutdown"], envTempThresholdData.FireShutdown.Text, labels...)
+		newGauge(logger, ch, envDesc["FanNormalSpeed"], envTempThresholdData.FanNormalSpeed.Text, labels...)
+		newGauge(logger, ch, envDesc["FanHighSpeed"], envTempThresholdData.FanHighSpeed.Text, labels...)
+		newGauge(logger, ch, envDesc["BadFanYellowAlarm"], envTempThresholdData.BadFanYellowAlarm.Text, labels...)
+		newGauge(logger, ch, envDesc["BadFanRedAlarm"], envTempThresholdData.BadFanRedAlarm.Text, labels...)
+		newGauge(logger, ch, envDesc["YellowAlarm"], envTempThresholdData.YellowAlarm.Text, labels...)
+		newGauge(logger, ch, envDesc["RedAlarm"], envTempThresholdData.RedAlarm.Text, labels...)
+		newGauge(logger, ch, envDesc["FireShutdown"], envTempThresholdData.FireShutdown.Text, labels...)
 	}
 
 	// ** unmarshal show chassis temperature-thresholds <get-temperature-threshold-information> END ** //

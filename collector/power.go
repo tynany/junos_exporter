@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Juniper/go-netconf/netconf"
+	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -41,11 +42,13 @@ var (
 )
 
 // PowerCollector collects power metrics, implemented as per the Collector interface.
-type PowerCollector struct{}
+type PowerCollector struct {
+	logger log.Logger
+}
 
 // NewPowerCollector returns a new PowerCollector .
-func NewPowerCollector() *PowerCollector {
-	return &PowerCollector{}
+func NewPowerCollector(logger log.Logger) *PowerCollector {
+	return &PowerCollector{logger: logger}
 }
 
 // Name of the collector.
@@ -71,14 +74,14 @@ func (c *PowerCollector) Get(ch chan<- prometheus.Metric, conf Config) ([]error,
 		return errors, totalPowerErrors
 	}
 
-	if err := processPowerNetconfReply(reply, ch); err != nil {
+	if err := processPowerNetconfReply(reply, ch, c.logger); err != nil {
 		totalPowerErrors++
 		errors = append(errors, err)
 	}
 	return errors, totalPowerErrors
 }
 
-func processPowerNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric) error {
+func processPowerNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric, logger log.Logger) error {
 	var netconfReply powerRPCReply
 
 	if err := xml.Unmarshal([]byte(reply.RawReply), &netconfReply); err != nil {
@@ -92,38 +95,38 @@ func processPowerNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metr
 			powerState = 1.0
 		}
 		ch <- prometheus.MustNewConstMetric(powerDesc["State"], prometheus.GaugeValue, powerState, labels...)
-		newGauge(ch, powerDesc["CapacityActual"], powerData.PemCapacityDetail.CapacityActual.Text, labels...)
-		newGauge(ch, powerDesc["CapacityMax"], powerData.PemCapacityDetail.CapacityMax.Text, labels...)
+		newGauge(logger, ch, powerDesc["CapacityActual"], powerData.PemCapacityDetail.CapacityActual.Text, labels...)
+		newGauge(logger, ch, powerDesc["CapacityMax"], powerData.PemCapacityDetail.CapacityMax.Text, labels...)
 
 		powerACInputState := 0.0
 		if powerData.AcInputDetail.AcInput.Text == "OK" {
 			powerACInputState = 1.0
 		}
 		ch <- prometheus.MustNewConstMetric(powerDesc["ACInputState"], prometheus.GaugeValue, powerACInputState, labels...)
-		newGauge(ch, powerDesc["ACExpectedFeeds"], powerData.AcInputDetail.AcExpectFeed.Text, labels...)
-		newGauge(ch, powerDesc["ACConnectedFeeds"], powerData.AcInputDetail.AcActualFeed.Text, labels...)
+		newGauge(logger, ch, powerDesc["ACExpectedFeeds"], powerData.AcInputDetail.AcExpectFeed.Text, labels...)
+		newGauge(logger, ch, powerDesc["ACConnectedFeeds"], powerData.AcInputDetail.AcActualFeed.Text, labels...)
 
 		labelsDCOutput := []string{strings.TrimSpace(powerData.Name.Text), strings.TrimSpace(powerData.DcOutputDetail.Zone.Text)}
-		newGauge(ch, powerDesc["DCOutputPower"], powerData.DcOutputDetail.DcPower.Text, labelsDCOutput...)
-		newGauge(ch, powerDesc["DCOutputCurrent"], powerData.DcOutputDetail.DcCurrent.Text, labelsDCOutput...)
-		newGauge(ch, powerDesc["DCOutputVoltage"], powerData.DcOutputDetail.DcVoltage.Text, labelsDCOutput...)
-		newGauge(ch, powerDesc["DCOutputLoad"], powerData.DcOutputDetail.DcLoad.Text, labelsDCOutput...)
+		newGauge(logger, ch, powerDesc["DCOutputPower"], powerData.DcOutputDetail.DcPower.Text, labelsDCOutput...)
+		newGauge(logger, ch, powerDesc["DCOutputCurrent"], powerData.DcOutputDetail.DcCurrent.Text, labelsDCOutput...)
+		newGauge(logger, ch, powerDesc["DCOutputVoltage"], powerData.DcOutputDetail.DcVoltage.Text, labelsDCOutput...)
+		newGauge(logger, ch, powerDesc["DCOutputLoad"], powerData.DcOutputDetail.DcLoad.Text, labelsDCOutput...)
 	}
 	for _, powerSystem := range netconfReply.PowerUsageInformation.PowerUsageSystem {
 		for _, zone := range powerSystem.PowerUsageZoneInformation {
 			labels := []string{strings.TrimSpace(zone.Zone.Text)}
-			newGauge(ch, powerDesc["CapacityZoneActual"], zone.CapacityActual.Text, labels...)
-			newGauge(ch, powerDesc["CapacityZoneMax"], zone.CapacityMax.Text, labels...)
-			newGauge(ch, powerDesc["CapacityZoneAllocated"], zone.CapacityAllocated.Text, labels...)
-			newGauge(ch, powerDesc["CapacityZoneRemaining"], zone.CapacityRemaining.Text, labels...)
-			newGauge(ch, powerDesc["CapacityZoneUsage"], zone.CapacityActualUsage.Text, labels...)
+			newGauge(logger, ch, powerDesc["CapacityZoneActual"], zone.CapacityActual.Text, labels...)
+			newGauge(logger, ch, powerDesc["CapacityZoneMax"], zone.CapacityMax.Text, labels...)
+			newGauge(logger, ch, powerDesc["CapacityZoneAllocated"], zone.CapacityAllocated.Text, labels...)
+			newGauge(logger, ch, powerDesc["CapacityZoneRemaining"], zone.CapacityRemaining.Text, labels...)
+			newGauge(logger, ch, powerDesc["CapacityZoneUsage"], zone.CapacityActualUsage.Text, labels...)
 		}
-		newGauge(ch, powerDesc["CapacitySysActual"], powerSystem.CapacitySysActual.Text)
-		newGauge(ch, powerDesc["CapacitySysMax"], powerSystem.CapacitySysMax.Text)
-		newGauge(ch, powerDesc["CapacitySysRemaining"], powerSystem.CapacitySysRemaining.Text)
+		newGauge(logger, ch, powerDesc["CapacitySysActual"], powerSystem.CapacitySysActual.Text)
+		newGauge(logger, ch, powerDesc["CapacitySysMax"], powerSystem.CapacitySysMax.Text)
+		newGauge(logger, ch, powerDesc["CapacitySysRemaining"], powerSystem.CapacitySysRemaining.Text)
 	}
 	for _, fruItem := range netconfReply.PowerUsageInformation.PowerUsageFruItem {
-		newGauge(ch, powerDesc["DCUsage"], fruItem.DcPower.Text, fruItem.Name.Text)
+		newGauge(logger, ch, powerDesc["DCUsage"], fruItem.DcPower.Text, fruItem.Name.Text)
 	}
 	return nil
 }

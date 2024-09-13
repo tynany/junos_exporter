@@ -2,24 +2,31 @@ package main
 
 import (
 	"fmt"
+	inbuiltLog "log"
 	"net/http"
 	"os"
 	"time"
 
+	"github.com/alecthomas/kingpin/v2"
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
+	versioncollector "github.com/prometheus/client_golang/prometheus/collectors/version"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/prometheus/common/log"
+	"github.com/prometheus/common/promlog"
+	"github.com/prometheus/common/promlog/flag"
 	"github.com/prometheus/common/version"
+	"github.com/prometheus/exporter-toolkit/web"
+	"github.com/prometheus/exporter-toolkit/web/kingpinflag"
 	"github.com/tynany/junos_exporter/collector"
 	"github.com/tynany/junos_exporter/config"
 	"golang.org/x/crypto/ssh"
-	kingpin "gopkg.in/alecthomas/kingpin.v2"
 )
 
 var (
-	listenAddress = kingpin.Flag("web.listen-address", "Address on which to expose metrics and web interface.").Default(":9347").String()
 	telemetryPath = kingpin.Flag("web.telemetry-path", "Path under which to expose metrics.").Default("/metrics").String()
 	configPath    = kingpin.Flag("config.path", "Path of the YAML configuration file.").Required().String()
+	webFlagConfig = kingpinflag.AddFlags(kingpin.CommandLine, ":9347")
 
 	// Slice of all configs.
 	collectors = []collector.Collector{}
@@ -35,16 +42,16 @@ var (
 	bgpTypeKeys              = map[string][]string{}
 )
 
-func initCollectors() {
-	collectors = append(collectors, collector.NewInterfaceCollector())
-	collectors = append(collectors, collector.NewBGPCollector())
-	collectors = append(collectors, collector.NewEnvCollector())
-	collectors = append(collectors, collector.NewPowerCollector())
-	collectors = append(collectors, collector.NewRECollector())
-	collectors = append(collectors, collector.NewIpsecCollector())
-	collectors = append(collectors, collector.NewOpticsCollector())
-	collectors = append(collectors, collector.NewOSPFCollector())
-	collectors = append(collectors, collector.NewFPCCollector())
+func initCollectors(logger log.Logger) {
+	collectors = append(collectors, collector.NewInterfaceCollector(logger))
+	collectors = append(collectors, collector.NewBGPCollector(logger))
+	collectors = append(collectors, collector.NewEnvCollector(logger))
+	collectors = append(collectors, collector.NewPowerCollector(logger))
+	collectors = append(collectors, collector.NewRECollector(logger))
+	collectors = append(collectors, collector.NewIpsecCollector(logger))
+	collectors = append(collectors, collector.NewOpticsCollector(logger))
+	collectors = append(collectors, collector.NewOSPFCollector(logger))
+	collectors = append(collectors, collector.NewFPCCollector(logger))
 }
 
 func validateRequest(configParam string, targetParam string) error {
@@ -82,58 +89,55 @@ TargetFound:
 	return nil
 }
 
-func handler(w http.ResponseWriter, r *http.Request) {
-	configParam := r.URL.Query().Get("config")
-	targetParam := r.URL.Query().Get("target")
-	if err := validateRequest(configParam, targetParam); err != nil {
-		http.Error(w, err.Error(), 400)
-		return
-	}
-	registry := prometheus.NewRegistry()
-	enabledCollectors := []collector.Collector{}
-	for _, collector := range collectors {
-		for _, col := range collectorConfig.Config[configParam].Collectors {
-			if collector.Name() == col {
-				enabledCollectors = append(enabledCollectors, collector)
+func handler(logger log.Logger) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		configParam := r.URL.Query().Get("config")
+		targetParam := r.URL.Query().Get("target")
+		if err := validateRequest(configParam, targetParam); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		registry := prometheus.NewRegistry()
+		enabledCollectors := []collector.Collector{}
+		for _, collector := range collectors {
+			for _, col := range collectorConfig.Config[configParam].Collectors {
+				if collector.Name() == col {
+					enabledCollectors = append(enabledCollectors, collector)
+				}
 			}
 		}
-	}
 
-	config := collector.Config{
-		SSHClientConfig: exporterSSHConfig[configParam],
-		SSHTarget:       targetParam,
-		IfaceDescrKeys:  interfaceDescriptionKeys[configParam],
-		IfaceMetricKeys: interfaceMetricKeys[configParam],
-		BGPTypeKeys:     bgpTypeKeys[configParam],
-	}
+		config := collector.Config{
+			SSHClientConfig: exporterSSHConfig[configParam],
+			SSHTarget:       targetParam,
+			IfaceDescrKeys:  interfaceDescriptionKeys[configParam],
+			IfaceMetricKeys: interfaceMetricKeys[configParam],
+			BGPTypeKeys:     bgpTypeKeys[configParam],
+		}
 
-	ne, err := collector.NewExporter(enabledCollectors, config)
-	if err != nil {
-		log.Errorf("could not start exporter: %s", err)
-		return
-	}
+		nc, err := collector.NewExporter(enabledCollectors, config, logger)
+		if err != nil {
+			level.Error(logger).Log("msg", "could not create collector", "err", err)
+			os.Exit(1)
+		}
 
-	if err := registry.Register(ne); err != nil {
-		log.Errorf("could not register exporter: %s", err)
-		return
-	}
+		if err := registry.Register(nc); err != nil {
+			level.Error(logger).Log("msg", "could not register collector", "err", err)
+			os.Exit(1)
+		}
 
-	gatherers := prometheus.Gatherers{
-		prometheus.DefaultGatherer,
-		registry,
-	}
-	handlerOpts := promhttp.HandlerOpts{
-		ErrorLog:      log.NewErrorLogger(),
-		ErrorHandling: promhttp.ContinueOnError,
-	}
-	promhttp.HandlerFor(gatherers, handlerOpts).ServeHTTP(w, r)
-}
+		gatherers := prometheus.Gatherers{
+			prometheus.DefaultGatherer,
+			registry,
+		}
+		handlerOpts := promhttp.HandlerOpts{
+			ErrorLog:      inbuiltLog.New(log.NewStdlibAdapter(level.Error(logger)), "", 0),
+			ErrorHandling: promhttp.ContinueOnError,
+		}
 
-func parseCLI() {
-	log.AddFlags(kingpin.CommandLine)
-	kingpin.Version(version.Print("junos_exporter"))
-	kingpin.HelpFlag.Short('h')
-	kingpin.Parse()
+		metricsHandler := promhttp.HandlerFor(gatherers, handlerOpts)
+		metricsHandler.ServeHTTP(w, r)
+	})
 }
 
 func generateSSHConfig() error {
@@ -217,13 +221,21 @@ func getBGPTypeKeys() {
 }
 
 func main() {
-	prometheus.MustRegister(version.NewCollector("junos_exporter"))
+	promlogConfig := &promlog.Config{}
 
-	initCollectors()
-	parseCLI()
+	flag.AddFlags(kingpin.CommandLine, promlogConfig)
+	kingpin.Version(version.Print("junos_exporter"))
+	kingpin.HelpFlag.Short('h')
+	kingpin.Parse()
 
-	log.Infof("Starting junos_exporter %s on %s", version.Info(), *listenAddress)
+	logger := promlog.New(promlogConfig)
 
+	initCollectors(logger)
+
+	prometheus.MustRegister(versioncollector.NewCollector("junos_exporter"))
+
+	level.Info(logger).Log("msg", "Starting junos_exporter", "version", version.Info())
+	level.Info(logger).Log("msg", "Build context", "build_context", version.BuildContext())
 	// Get a list of collector names to validate collectors specified in the config file exist.
 	var collectorNames []string
 	for _, collector := range collectors {
@@ -232,29 +244,39 @@ func main() {
 	var err error
 	collectorConfig, err = config.LoadConfigFile(*configPath, collectorNames)
 	if err != nil {
-		log.Fatal(err)
+		level.Error(logger).Log("err", err)
+		os.Exit(1)
 	}
 
 	if err = generateSSHConfig(); err != nil {
-		log.Errorf("could not generate SSH configuration: %s", err)
+		level.Error(logger).Log("could not generate SSH configuration", err)
 	}
 
 	getInterfaceDescriptionKeys()
 	getInterfaceMetricKeys()
 	getBGPTypeKeys()
 
-	http.HandleFunc(*telemetryPath, handler)
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`<html>
-			<head><title>junos Exporter</title></head>
-			<body>
-			<h1>junos Exporter</h1>
-			<p><a href="` + *telemetryPath + `">Metrics</a></p>
-			</body>
-			</html>`))
-	})
+	http.Handle(*telemetryPath, handler(logger))
+	if *telemetryPath != "/" && *telemetryPath != "" {
+		landingConfig := web.LandingConfig{
+			Name:        "Junos Exporter",
+			Description: "Prometheus Exporter for Junos",
+			Version:     version.Info(),
+			Links: []web.LandingLinks{
+				{Address: *telemetryPath, Text: "Metrics"},
+			},
+		}
+		landingPage, err := web.NewLandingPage(landingConfig)
+		if err != nil {
+			level.Error(logger).Log("err", err)
+			os.Exit(1)
+		}
+		http.Handle("/", landingPage)
+	}
 
-	if err := http.ListenAndServe(*listenAddress, nil); err != nil {
-		log.Fatal(err)
+	server := &http.Server{}
+	if err := web.ListenAndServe(server, webFlagConfig, logger); err != nil {
+		level.Error(logger).Log("err", err)
+		os.Exit(1)
 	}
 }
