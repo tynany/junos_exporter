@@ -80,15 +80,19 @@ func parseConfig(configuration *Configuration, validCollectors []string) error {
 			if err != nil {
 				return fmt.Errorf("invalid ssh_key %q in %q configuration: %v", configData.SSHKey, name, err)
 			}
-			for _, collector := range configData.Collectors {
-				for _, validCollector := range validCollectors {
-					if collector == validCollector {
-						goto CollectorFound
-					}
+		}
+
+		for _, collector := range configData.Collectors {
+			valid := false
+			for _, validCollector := range validCollectors {
+				if collector == validCollector {
+					valid = true
+					break
 				}
+			}
+			if !valid {
 				return fmt.Errorf("invalid collector %q in %q configuration", collector, name)
 			}
-		CollectorFound:
 		}
 	}
 	return nil
