@@ -234,17 +234,15 @@ func processIfaceNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metr
 		}
 		if len(ifaceData.Speed.Text) > 0 {
 			if strings.Contains(strings.TrimSpace(ifaceData.Speed.Text), "Gbps") {
-				i, err := strconv.Atoi(strings.TrimRight(strings.TrimSpace(ifaceData.Speed.Text), "Gbps"))
-				if err != nil {
-					return err
+				i, err := strconv.Atoi(strings.TrimSuffix(strings.TrimSpace(ifaceData.Speed.Text), "Gbps"))
+				if err == nil {
+					ch <- prometheus.MustNewConstMetric(ifaceDesc["SpeedBytes"], prometheus.GaugeValue, float64(i*125000000), ifaceLabels...)
 				}
-				ch <- prometheus.MustNewConstMetric(ifaceDesc["SpeedBytes"], prometheus.GaugeValue, float64(i*125000000), ifaceLabels...)
 			} else if strings.Contains(strings.TrimSpace(ifaceData.Speed.Text), "mbps") {
-				i, err := strconv.Atoi(strings.TrimRight(strings.TrimSpace(ifaceData.Speed.Text), "mbps"))
-				if err != nil {
-					return err
+				i, err := strconv.Atoi(strings.TrimSuffix(strings.TrimSpace(ifaceData.Speed.Text), "mbps"))
+				if err == nil {
+					ch <- prometheus.MustNewConstMetric(ifaceDesc["SpeedBytes"], prometheus.GaugeValue, float64(i*125000), ifaceLabels...)
 				}
-				ch <- prometheus.MustNewConstMetric(ifaceDesc["SpeedBytes"], prometheus.GaugeValue, float64(i*125000), ifaceLabels...)
 			}
 		}
 
