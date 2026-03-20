@@ -118,12 +118,14 @@ func handler(logger log.Logger) http.Handler {
 		nc, err := collector.NewExporter(enabledCollectors, config, logger)
 		if err != nil {
 			level.Error(logger).Log("msg", "could not create collector", "err", err)
-			os.Exit(1)
+			http.Error(w, "could not create collector: "+err.Error(), http.StatusInternalServerError)
+			return
 		}
 
 		if err := registry.Register(nc); err != nil {
 			level.Error(logger).Log("msg", "could not register collector", "err", err)
-			os.Exit(1)
+			http.Error(w, "could not register collector: "+err.Error(), http.StatusInternalServerError)
+			return
 		}
 
 		gatherers := prometheus.Gatherers{
