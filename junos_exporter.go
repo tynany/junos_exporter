@@ -249,7 +249,8 @@ func main() {
 	}
 
 	if err = generateSSHConfig(); err != nil {
-		level.Error(logger).Log("could not generate SSH configuration", err)
+		level.Error(logger).Log("msg", "could not generate SSH configuration", "err", err)
+		os.Exit(1)
 	}
 
 	getInterfaceDescriptionKeys()
