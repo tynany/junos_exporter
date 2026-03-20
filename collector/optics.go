@@ -142,7 +142,7 @@ func processOpticsNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Met
 
 		opticsTempLowAlarm := 0.0
 		if opticsData.OpticsDiagnostics.ModuleTemperatureLowAlarm.Text == "off" {
-			opticsTempHighAlarm = 1.0
+			opticsTempLowAlarm = 1.0
 		}
 		ch <- prometheus.MustNewConstMetric(opticsDesc["ModuleTemperatureLowAlarm"], prometheus.GaugeValue, opticsTempLowAlarm, labels...)
 
@@ -154,7 +154,7 @@ func processOpticsNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Met
 
 		opticsTempLowWarn := 0.0
 		if opticsData.OpticsDiagnostics.ModuleTemperatureLowWarn.Text == "off" {
-			opticsTempHighWarn = 1.0
+			opticsTempLowWarn = 1.0
 		}
 		ch <- prometheus.MustNewConstMetric(opticsDesc["ModuleTemperatureLowWarn"], prometheus.GaugeValue, opticsTempLowWarn, labels...)
 
@@ -166,7 +166,7 @@ func processOpticsNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Met
 
 		opticsVoltageLowAlarm := 0.0
 		if opticsData.OpticsDiagnostics.ModuleVoltageLowAlarm.Text == "off" {
-			opticsVoltageHighAlarm = 1.0
+			opticsVoltageLowAlarm = 1.0
 		}
 		ch <- prometheus.MustNewConstMetric(opticsDesc["ModuleVoltageLowAlarm"], prometheus.GaugeValue, opticsVoltageLowAlarm, labels...)
 
@@ -178,7 +178,7 @@ func processOpticsNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Met
 
 		opticsVoltageLowWarn := 0.0
 		if opticsData.OpticsDiagnostics.ModuleVoltageLowWarn.Text == "off" {
-			opticsVoltageHighWarn = 1.0
+			opticsVoltageLowWarn = 1.0
 		}
 		ch <- prometheus.MustNewConstMetric(opticsDesc["ModuleVoltageLowWarn"], prometheus.GaugeValue, opticsVoltageLowWarn, labels...)
 
