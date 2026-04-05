@@ -123,12 +123,12 @@ func (c *BGPCollector) Get(ch chan<- prometheus.Metric, conf Config) ([]error, f
 		if !strings.Contains(routeInstance, "__master") && !strings.Contains(routeInstance, "__juniper") && !strings.Contains(routeInstance, "mgmt_junos") {
 			routeInstanceCommand := fmt.Sprintf(`<get-bgp-summary-information><instance>%s</instance></get-bgp-summary-information>`, routeInstance)
 			replyBgpSummaryVrf, err := s.Exec(netconf.RawMethod(routeInstanceCommand))
-			replyBgpSummaryInstance[routeInstance] = replyBgpSummaryVrf
 			if err != nil {
 				totalBGPErrors++
 				errors = append(errors, fmt.Errorf("could not execute netconf RPC call: %s", err))
 				return errors, totalBGPErrors
 			}
+			replyBgpSummaryInstance[routeInstance] = replyBgpSummaryVrf
 		}
 	}
 
