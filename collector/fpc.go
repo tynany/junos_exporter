@@ -79,7 +79,7 @@ func processFPCNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric
 	}
 	for _, data := range netconfReply.FPCInformation.FPCItem {
 		labels := []string{strings.TrimSpace(data.Slot)}
-		state := 3.0
+		state := 4.0 // Other/unrecognized
 		if strings.ToLower(data.State) == "offline" {
 			state = 0.0
 		} else if strings.ToLower(data.State) == "online" {
@@ -101,7 +101,7 @@ func processFPCNetconfReply(reply *netconf.RPCReply, ch chan<- prometheus.Metric
 			ch <- prometheus.MustNewConstMetric(fpcDesc["MemoryHeapUtil"], prometheus.GaugeValue, data.MemoryHeapUtilization, labels...)
 			ch <- prometheus.MustNewConstMetric(fpcDesc["MemoryBufferUtil"], prometheus.GaugeValue, data.MemoryBufferUtilization, labels...)
 		} else if strings.ToLower(data.State) == "empty" {
-			state = 3.0
+			state = 2.0
 		}
 		ch <- prometheus.MustNewConstMetric(fpcDesc["State"], prometheus.GaugeValue, state, labels...)
 	}
